@@ -114,7 +114,7 @@ $import_log_key = $result['import_log_key'] ?? '';
 
     <!-- FIX #14: Reverse import option -->
     <?php if ( $import_log_key ) : ?>
-    <div class="kd-section" style="margin-top:1.5rem;border-left:3px solid #d63638;background:#fef7f7">
+    <div class="kd-section" style="margin-top:1.5rem;border-left:3px solid #d63638;background:var(--bg-body)">
         <h4 style="margin-top:0;color:#d63638">Undo This Import</h4>
         <p style="font-size:13px">
             You can reverse this import within 24 hours. This will delete all newly inserted academic records,
