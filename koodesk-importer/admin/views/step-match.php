@@ -183,9 +183,9 @@ function kd_student_display_id( array $student ): string {
 </div>
 
 <style>
-.kd-match-row--matched td  { background: #f0fff4 !important; }
-.kd-match-row--ambiguous td{ background: #fffbee !important; }
-.kd-match-row--not_found td{ background: #fff5f5 !important; }
+.kd-match-row--matched td  { background: var(--assigned-back) !important; }
+.kd-match-row--ambiguous td{ background: var(--yellow-dark) !important; }
+.kd-match-row--not_found td{ background: var(--unassigned-back) !important; }
 .kd-match-row:hover td     { filter: brightness(0.97); }
 </style>
 
