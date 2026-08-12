@@ -30,7 +30,7 @@ $ajax_url = admin_url( 'admin-ajax.php' );
 		<?php endif; ?>
 	</div>
 
-	<p style="margin:0 0 1rem;font-size:13px;color:#555">
+	<p style="margin:0 0 1rem;font-size:13px;color:#666">
 		A log of all completed imports. Use <strong>Undo</strong> to delete inserted records.
 		Records that were <em>updated</em> (not newly created) cannot be automatically reversed.
 	</p>
