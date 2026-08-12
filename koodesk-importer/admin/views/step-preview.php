@@ -101,7 +101,7 @@ $has_mismatches = ! empty( $total_mismatch_subjects );
                 <td><strong><?php echo esc_html( $subj['subject_name'] ); ?></strong></td>
                 <td>
                     <?php foreach ( $subj['assessments'] as $a ) : ?>
-                        <span style="display:inline-block;margin:1px 2px;background:#e7f0fb;padding:1px 6px;border-radius:3px;white-space:nowrap">
+                        <span style="display:inline-block;margin:1px 2px;background:var(--list-btn-hover);padding:1px 6px;border-radius:3px;white-space:nowrap">
                             <?php echo esc_html( $a['label'] ); ?> → <code style="font-size:11px"><?php echo esc_html( $a['col'] ); ?></code>
                         </span>
                     <?php endforeach; ?>
