@@ -149,10 +149,10 @@ class Koodesk_Admin_UI {
 
 		// Inline the CSS directly in shortcode output as a guaranteed fallback.
 		// Bricks Builder may strip enqueued styles in its canvas/rendering pipeline.
-		if ( ! self::$css_printed ) {
+		/*if ( ! self::$css_printed ) {
 			self::$css_printed = true;
 			echo '<style id="kd-importer-css">' . $this->get_inline_css() . '</style>';
-		}
+		}*/
 		echo '<div class="kd-importer kd-importer--frontend">';
 		// heading removed
 
@@ -674,10 +674,10 @@ class Koodesk_Admin_UI {
 
 		ob_start();
 
-		if ( ! self::$css_printed ) {
+		/*if ( ! self::$css_printed ) {
 			self::$css_printed = true;
 			echo '<style id="kd-importer-css">' . $this->get_inline_css() . '</style>';
-		}
+		}*/
 
 		echo '<div class="kd-importer kd-importer--frontend">';
 		echo '<h2>Import History</h2>';
@@ -1234,16 +1234,16 @@ class Koodesk_Admin_UI {
 		/* ── Koodesk Importer — shared admin + frontend styles ── */
 
 		.kd-importer {
-			max-width: 1100px;
+			width: 100%;
 			font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 			font-size: 14px;
-			color: #1d2327;
+			color: var(--text-body);
 		}
 		.kd-importer h2 {
 			font-size: 1.4rem;
 			font-weight: 700;
 			margin: 0 0 1.25rem;
-			color: #1d2327;
+			color: var(--text-body);
 		}
 
 		/* ── Progress stepper ── */
@@ -1258,19 +1258,19 @@ class Koodesk_Admin_UI {
 		.kd-step {
 			flex: 1;
 			padding: 9px 14px;
-			background: #f6f7f7;
-			border-right: 1px solid #c3c4c7;
-			border-top: 1px solid #c3c4c7;
-			border-bottom: 1px solid #c3c4c7;
+			background: var(--bg-medium);
+			border-right: 1px solid var(--border-primary);
+			border-top: 1px solid var(--border-primary);
+			border-bottom: 1px solid var(--border-primary);
 			font-size: 12px;
 			font-weight: 500;
-			color: #50575e;
+			color: var(--text-body);
 			text-align: center;
 			white-space: nowrap;
 			transition: background .15s;
 		}
-		.kd-step:first-child { border-left: 1px solid #c3c4c7; border-radius: 4px 0 0 4px; }
-		.kd-step:last-child  { border-right: 1px solid #c3c4c7; border-radius: 0 4px 4px 0; }
+		.kd-step:first-child { border-left: 1px solid var(--border-primary); border-radius: 4px 0 0 4px; }
+		.kd-step:last-child  { border-right: 1px solid var(--border-primary); border-radius: 0 4px 4px 0; }
 		.kd-step--active {
 			background: #2271b1;
 			color: #fff;
@@ -1289,8 +1289,8 @@ class Koodesk_Admin_UI {
 		.kd-section {
 			margin-top: 1.25rem;
 			padding: 1.1rem 1.4rem;
-			background: #fff;
-			border: 1px solid #dcdcde;
+			background: var(--bg-surface);
+			border: 1px solid var(--border-primary);
 			border-radius: 4px;
 			box-shadow: 0 1px 2px rgba(0,0,0,.05);
 		}
@@ -1299,7 +1299,7 @@ class Koodesk_Admin_UI {
 			margin-top: 0;
 			margin-bottom: .75rem;
 			font-size: 1rem;
-			color: #1d2327;
+			color: var(--text-body);
 		}
 
 		/* ── Tables ── */
@@ -1310,20 +1310,24 @@ class Koodesk_Admin_UI {
 			font-size: 13px;
 		}
 		.kd-table th {
-			background: #f6f7f7;
+			background: var(--bg-medium);
 			text-align: left;
 			padding: 8px 11px;
-			border: 1px solid #dcdcde;
-			font-weight: 600;
-			color: #3c434a;
+			letter-spacing: 0.3px;
+			border: 1px solid var(--border-primary);
+			font-weight: 500;
+			font-size: var(--font-size-tiny);
+			color: var(--tertiary);
+			text-transform: uppercase;
 		}
 		.kd-table td {
 			padding: 7px 11px;
-			border: 1px solid #dcdcde;
+			border: 1px solid var(--border-primary);
 			vertical-align: middle;
+			background: var(--bg-surface);
 		}
-		.kd-table tr:nth-child(even) td { background: #f9f9f9; }
-		.kd-table tr:hover td { background: #f0f6fc; }
+		.kd-table tr:nth-child(even) td { background: var(--bg-body); }
+		.kd-table tr:hover td { background: var(--hover-color); }
 
 		/* ── Badges ── */
 		.kd-badge {
@@ -1350,16 +1354,16 @@ class Koodesk_Admin_UI {
 			width: 100%;
 			max-width: 340px;
 			padding: 7px 10px;
-			border: 1px solid #8c8f94;
+			border: 1px solid var(--border-primary);
 			border-radius: 3px;
 			font-size: 13px;
-			background: #fff;
-			color: #1d2327;
+			background: var(--white-brown);
+			color: var(--text-body);
 			line-height: 1.4;
 		}
 		.kd-importer--frontend input[type="file"] {
 			padding: 5px 8px;
-			background: #f6f7f7;
+			background: var(--white-brown);
 			cursor: pointer;
 		}
 		.kd-importer--frontend select.kd-select { max-width: 280px; }
@@ -1391,12 +1395,12 @@ class Koodesk_Admin_UI {
 			line-height: 1;
 		}
 		.kd-importer--frontend .button-primary {
-			background: #2271b1;
-			border-color: #135e96;
+			background: var(--primary);
+			border-color: var(--primary-d-1);
 			color: #fff;
-		}
-		.kd-importer--frontend .button-primary:hover { background: #135e96; }
-		.kd-importer--frontend .button:hover { background: #f0f0f1; }
+		}	
+		.kd-importer--frontend .button:hover { background: #E9F0F6; }
+		.kd-importer--frontend .button-primary:hover { background: var(--primary-d-1); }
 		.kd-importer--frontend .button-small {
 			padding: 4px 10px;
 			font-size: 12px;
@@ -1405,11 +1409,11 @@ class Koodesk_Admin_UI {
 
 		/* ── Subject blocks ── */
 		.kd-subject-block {
-			border: 1px solid #dcdcde;
+			border: 1px solid var(--border-primary);
 			border-left: 3px solid #2271b1;
 			padding: 1rem 1.1rem;
 			margin-bottom: .9rem;
-			background: #fafcff;
+			background: var(--bg-body);
 			border-radius: 0 4px 4px 0;
 		}
 		.kd-subject-block h4 { margin: 0 0 .65rem; }
@@ -1439,7 +1443,7 @@ class Koodesk_Admin_UI {
 			cursor: pointer;
 		}
 		.kd-importer select option,
-		.kd-importer--frontend select option { background: #fff; color: #1d2327; }
+		.kd-importer--frontend select option { background: var(--white-brown); color: var(--text-body); }
 
 		/* ── Mapped-column legend ── */
 		.kd-mapped-legend {
@@ -1462,7 +1466,7 @@ class Koodesk_Admin_UI {
 			color: #50575e !important;
 		}
 		.kd-back-btn:hover {
-			background: #dcdcde !important;
+			background: #E9F0F6 !important;
 			color: #1d2327 !important;
 		}
 
@@ -1477,14 +1481,17 @@ class Koodesk_Admin_UI {
 		}
 		.kd-notice--warning {
 			border-left-color: #f0b849;
-			background: #fff9e6;
+			border-top: 1px solid var(--border-primary);
+			border-bottom: 1px solid var(--border-primary);
+			border-right: 1px solid var(--border-primary);
+			background: var(--yellow-dark);
 		}
 		.kd-notice--error {
 			border-left-color: #d63638;
-			background: #fef7f7;
+			background: var(--unassigned-back);
 		}
-		.notice.notice-error { border-left-color: #d63638; background: #fef7f7; }
-		.notice.notice-info  { border-left-color: #72aee6; background: #e7f3ff; }
+		.notice.notice-error { border-top: 1px solid var(--border-primary); border-bottom: 1px solid var(--border-primary); border-right: 1px solid var(--border-primary); border-left: 3px solid #d63638; padding: 10px; background: var(--unassigned-back); }
+		.notice.notice-info  { border-top: 1px solid var(--border-primary); border-bottom: 1px solid var(--border-primary); border-right: 1px solid var(--border-primary); border-left: 3px solid #72aee6; padding: 10px; background: var(--list-btn-hover); }
 
 		/* ── Issue list in preview ── */
 		.kd-issue-list { margin: .5rem 0; padding: 0; list-style: none; }
