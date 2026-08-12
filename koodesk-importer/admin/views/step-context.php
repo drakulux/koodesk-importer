@@ -78,13 +78,13 @@ $get_example = function( string $col ) use ( $example_row ): string {
     <?php if ( ! empty( $profile_mapping ) ) : ?>
     <details style="margin-top:1.5rem" open>
         <summary style="cursor:pointer;font-weight:700;font-size:14px">
-            Full Column Mapping Review — <span style="font-weight:normal;color:#555">using first student as example</span>
+            Full Column Mapping Review — <span style="font-weight:normal;color:#666">using first student as example</span>
         </summary>
 
         <div style="margin-top:.85rem">
 
             <!-- Student fields -->
-            <h4 style="font-size:13px;margin:.5rem 0 .4rem;color:#1d2327">Student &amp; Context Fields</h4>
+            <h4 style="font-size:13px;margin:.5rem 0 .4rem;color:var(--text-body)">Student &amp; Context Fields</h4>
             <table class="kd-table" style="max-width:780px">
                 <thead>
                     <tr>
@@ -102,7 +102,7 @@ $get_example = function( string $col ) use ( $example_row ): string {
                     <td><?php echo esc_html($csv_col); ?></td>
                     <td>
                         <?php if ( $example !== '' ) : ?>
-                            <span style="background:#f0fff4;border-radius:3px;padding:1px 6px;font-family:monospace;font-size:12px"><?php echo esc_html($example); ?></span>
+                            <span style="font-size:12px"><?php echo esc_html($example); ?></span>
                         <?php else : ?>
                             <em style="color:#999;font-size:12px">empty</em>
                         <?php endif; ?>
@@ -115,7 +115,7 @@ $get_example = function( string $col ) use ( $example_row ): string {
                 <tr>
                     <td><code>term</code></td>
                     <td><?php echo esc_html($profile_mapping['term_col']); ?></td>
-                    <td><?php if ( $example !== '' ) echo '<span style="background:#f0fff4;border-radius:3px;padding:1px 6px;font-family:monospace;font-size:12px">' . esc_html($example) . '</span>'; else echo '<em style="color:#999;font-size:12px">empty</em>'; ?></td>
+                    <td><?php if ( $example !== '' ) echo '<span style="font-size:12px">' . esc_html($example) . '</span>'; else echo '<em style="color:#999;font-size:12px">empty</em>'; ?></td>
                 </tr>
                 <?php endif; ?>
                 <?php if ( ! empty( $profile_mapping['session_col'] ) ) :
@@ -124,7 +124,7 @@ $get_example = function( string $col ) use ( $example_row ): string {
                 <tr>
                     <td><code>session</code></td>
                     <td><?php echo esc_html($profile_mapping['session_col']); ?></td>
-                    <td><?php if ( $example !== '' ) echo '<span style="background:#f0fff4;border-radius:3px;padding:1px 6px;font-family:monospace;font-size:12px">' . esc_html($example) . '</span>'; else echo '<em style="color:#999;font-size:12px">empty</em>'; ?></td>
+                    <td><?php if ( $example !== '' ) echo '<span style="font-size:12px">' . esc_html($example) . '</span>'; else echo '<em style="color:#999;font-size:12px">empty</em>'; ?></td>
                 </tr>
                 <?php endif; ?>
                 </tbody>
@@ -132,7 +132,7 @@ $get_example = function( string $col ) use ( $example_row ): string {
 
             <!-- Subjects -->
             <?php if ( ! empty( $profile_mapping['subjects'] ) ) : ?>
-            <h4 style="font-size:13px;margin:1.2rem 0 .4rem;color:#1d2327">Subject Mappings (<?php echo count($profile_mapping['subjects']); ?>)</h4>
+            <h4 style="font-size:13px;margin:1.2rem 0 .4rem;color:var(--text-body)">Subject Mappings (<?php echo count($profile_mapping['subjects']); ?>)</h4>
             <?php foreach ( $profile_mapping['subjects'] as $subj ) : ?>
             <div class="kd-subject-block" style="margin-bottom:.75rem">
                 <h4 style="margin:0 0 .4rem;font-size:13px"><?php echo esc_html( $subj['subject_name'] ); ?></h4>
@@ -151,7 +151,7 @@ $get_example = function( string $col ) use ( $example_row ): string {
                         <td><code><?php echo esc_html($a['col']); ?></code></td>
                         <td>
                             <?php if ( $example !== '' ) : ?>
-                                <span style="background:#f0fff4;border-radius:3px;padding:1px 6px;font-family:monospace;font-size:12px"><?php echo esc_html($example); ?></span>
+                                <span style="font-size:12px"><?php echo esc_html($example); ?></span>
                             <?php else : ?>
                                 <em style="color:#999;font-size:12px">empty</em>
                             <?php endif; ?>
@@ -169,12 +169,12 @@ $get_example = function( string $col ) use ( $example_row ): string {
                         if ( empty( $subj[ $key ] ) ) continue;
                         $example = $get_example( $subj[$key] ) ?? '';
                     ?>
-                    <tr style="background:#f9f9fb">
-                        <td style="color:#666"><?php echo $label; ?></td>
+                    <tr>
+                        <td><?php echo $label; ?></td>
                         <td><code><?php echo esc_html($subj[$key]); ?></code></td>
                         <td>
                             <?php if ( $example !== '' ) : ?>
-                                <span style="background:#f0f6fc;border-radius:3px;padding:1px 6px;font-family:monospace;font-size:12px"><?php echo esc_html($example); ?></span>
+                                <span style="font-size:12px"><?php echo esc_html($example); ?></span>
                             <?php else : ?>
                                 <em style="color:#999;font-size:12px">empty</em>
                             <?php endif; ?>
@@ -189,7 +189,7 @@ $get_example = function( string $col ) use ( $example_row ): string {
 
             <!-- Summary fields -->
             <?php if ( ! empty( $profile_mapping['summary_fields'] ) ) : ?>
-            <h4 style="font-size:13px;margin:1.2rem 0 .4rem;color:#1d2327">Term Summary Fields</h4>
+            <h4 style="font-size:13px;margin:1.2rem 0 .4rem;color:var(--text-body)">Term Summary Fields</h4>
             <table class="kd-table" style="max-width:780px">
                 <thead><tr>
                     <th style="width:170px">DB Field</th>
@@ -205,7 +205,7 @@ $get_example = function( string $col ) use ( $example_row ): string {
                     <td><?php echo esc_html($csv_col); ?></td>
                     <td>
                         <?php if ( $example !== '' ) : ?>
-                            <span style="background:#f0fff4;border-radius:3px;padding:1px 6px;font-family:monospace;font-size:12px"><?php echo esc_html($example); ?></span>
+                            <span><?php echo esc_html($example); ?></span>
                         <?php else : ?>
                             <em style="color:#999;font-size:12px">empty</em>
                         <?php endif; ?>
@@ -216,8 +216,8 @@ $get_example = function( string $col ) use ( $example_row ): string {
             </table>
             <!-- Total marks obtainable (calculated, always shown) -->
             <?php if ( isset( $total_marks_calculated ) && $total_marks_calculated > 0 ) : ?>
-            <p style="margin:.6rem 0 0;font-size:13px;color:#555">
-                <strong>Total marks obtainable (calculated):</strong>
+            <p style="margin:.6rem 0 0;font-size:13px;color:var(--text-body)">
+                <strong style=" color: var(--tertiary)">Total marks obtainable (calculated):</strong>
                 <?php echo intval( $total_marks_calculated ); ?>
                 <span style="color:#888">(<?php echo intval( $subject_count_estimated ); ?> subjects × 100 — used when no total marks column is mapped)</span>
             </p>
