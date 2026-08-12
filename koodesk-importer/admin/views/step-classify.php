@@ -207,7 +207,7 @@ $editing_saved = ( $profile_id > 0 && $pm !== null );
 					<td>
 					<?php if ( $db_field === 'current_class_name' && ! empty( $system_classes ) ) : ?>
 						<?php echo kd_header_select( 'student_field_map[' . $db_field . ']', $suggested, $headers, 'id="kd-class-col-select"' ); ?>
-						<br><small style="color:#555;font-size:11px;display:block;margin-top:3px">Confirm system class:</small>
+						<br><small style="color:#666;font-size:11px;display:block;margin-top:3px">Confirm system class:</small>
 						<select name="class_confirm_id" id="kd-class-confirm" class="kd-select" style="max-width:240px;font-size:12px;margin-top:2px">
 							<option value="">— No override —</option>
 							<?php foreach ( $system_classes as $sc ) : ?>
@@ -230,7 +230,7 @@ $editing_saved = ( $profile_id > 0 && $pm !== null );
 
 		<!-- ── 2. Assessment labels ───────────────────────────────────── -->
 		<div class="kd-section" style="margin-top:1rem">
-			<h4 style="margin-top:0">Assessment Labels <span style="font-weight:normal;font-size:12px;color:#555">— define once, shared by all subjects</span></h4>
+			<h4 style="margin-top:0">Assessment Labels <span style="font-weight:normal;font-size:12px;color:#666">— define once, shared by all subjects</span></h4>
 			<p class="description">e.g. <strong>1st CA</strong>, <strong>2nd CA</strong>, <strong>Exam</strong> — these labels appear under each subject below.</p>
 			<table class="kd-table" style="max-width:360px">
 				<thead><tr><th>Label</th><th style="width:40px"></th></tr></thead>
@@ -269,9 +269,9 @@ $editing_saved = ( $profile_id > 0 && $pm !== null );
 
 		<!-- ── 4. Term summary ────────────────────────────────────────── -->
 		<div class="kd-section" style="margin-top:1rem">
-			<h4 style="margin-top:0">Term Summary Columns <span style="font-weight:normal;font-size:12px;color:#555">— optional</span></h4>
-			<table class="kd-table" style="max-width:680px">
-				<thead><tr><th style="width:200px">Field</th><th>CSV Column</th><th style="width:160px">Detected</th></tr></thead>
+			<h4 style="margin-top:0">Term Summary Columns <span style="font-weight:normal;font-size:12px;color:#666">— optional</span></h4>
+			<table class="kd-table" style="max-width:750px">
+				<thead><tr><th style="width:200px">Field</th><th>CSV Column</th><th>Detected</th></tr></thead>
 				<tbody>
 				<?php foreach ( $summary_db_fields as $db_field => $label ) :
 					$suggested = $suggest[ $db_field ] ?? ''; ?>
@@ -290,7 +290,7 @@ $editing_saved = ( $profile_id > 0 && $pm !== null );
 		<?php if ( $import_type === 'students' ) : ?>
 		<!-- ── Family Information ──────────────────────────────────────── -->
 		<div class="kd-section" style="margin-top:1rem;border-left:3px solid #72aee6">
-			<h4 style="margin-top:0">Family Information <span style="font-weight:normal;font-size:12px;color:#555">— optional</span></h4>
+			<h4 style="margin-top:0">Family Information <span style="font-weight:normal;font-size:12px;color:#666">— optional</span></h4>
 			<p class="description">
 				Students are linked to a <strong>family</strong> record (shared by siblings).
 				By default the family is found or created using the student's <strong>last name</strong> —
@@ -314,7 +314,7 @@ $editing_saved = ( $profile_id > 0 && $pm !== null );
 
 		<!-- ── Guardian / Parent Contact ───────────────────────────────── -->
 		<div class="kd-section" style="margin-top:1rem;border-left:3px solid #72aee6">
-			<h4 style="margin-top:0">Guardian / Parent Contact <span style="font-weight:normal;font-size:12px;color:#555">— optional</span></h4>
+			<h4 style="margin-top:0">Guardian / Parent Contact <span style="font-weight:normal;font-size:12px;color:#666">— optional</span></h4>
 			<p class="description">
 				Map these columns if your CSV includes guardian information.
 				Each piece of contact information must be in its own separate CSV column
@@ -328,7 +328,7 @@ $editing_saved = ( $profile_id > 0 && $pm !== null );
 				<?php foreach ( $guardian_sub_fields as $sub_field => $label ) :
 					$suggested = $suggest[ $sub_field ] ?? ''; ?>
 				<tr>
-					<td><strong><?php echo esc_html( $label ); ?></strong><br><code style="font-size:11px;color:#555"><?php echo esc_html( $sub_field ); ?></code></td>
+					<td><strong><?php echo esc_html( $label ); ?></strong><br><code style="font-size:11px;color:#666"><?php echo esc_html( $sub_field ); ?></code></td>
 					<td><?php echo kd_header_select( 'guardian_field_map[' . $sub_field . ']', $suggested, $headers ); ?></td>
 					<td><?php echo $suggested ? '<span class="kd-badge kd-badge--green">✓ ' . esc_html( $suggested ) . '</span>' : '<span class="kd-badge kd-badge--grey">None</span>'; ?></td>
 				</tr>
@@ -340,16 +340,16 @@ $editing_saved = ( $profile_id > 0 && $pm !== null );
 
 		<!-- ── Save profile ───────────────────────────────────────────── -->
 		<?php if ( ! $editing_saved ) : ?>
-		<div class="kd-section" style="margin-top:1rem;background:#f0f6fc;border-color:#72aee6">
+		<div class="kd-section" style="margin-top:1rem;background:var(--bg-medium);border-color:var(--border-primary)">
 			<h4 style="margin-top:0">Save Profile</h4>
 			<label style="display:flex;align-items:flex-start;gap:.5rem;cursor:pointer">
 				<input type="checkbox" id="kd-save-profile-chk" name="do_save_profile" value="1" style="margin-top:3px">
-				<span><strong>Save this mapping as a profile for future imports</strong><br>
-				<small style="color:#555">Profiles let you skip re-mapping when importing the same file format again.</small></span>
+				<span style="color:var(--text-body)"><strong>Save this mapping as a profile for future imports</strong><br>
+				<small style="color:var(--tertiary)">Profiles let you skip re-mapping when importing the same file format again.</small></span>
 			</label>
 			<div id="kd-profile-name-wrap" style="display:none;margin-top:.75rem">
 				<label>
-					<strong>Profile Name</strong><br>
+					<strong style="color:var(--text-body)">Profile Name</strong><br>
 					<input type="text" name="profile_name" id="kd-profile-name" class="regular-text" placeholder="e.g. JSS1A Term Result Sheet" style="margin-top:4px">
 					<span id="kd-profile-name-hint" style="font-size:11px;margin-left:.4rem"></span>
 				</label>
@@ -524,7 +524,7 @@ function buildBlock(idx, subjectId, subjectName, subjectCode, assessments, meta)
     metaFields.forEach(function(f) {
         metaHTML +=
             '<tr>'
-            + '<td style="width:100px;font-size:12px;color:#555;padding:5px 8px"><strong>' + f.label + '</strong></td>'
+            + '<td style="width:100px;font-size:12px;color:#666;padding:5px 8px"><strong>' + f.label + '</strong></td>'
             + '<td style="padding:5px 8px">'
             + '<select name="subject_map[' + idx + '][' + f.key + ']" class="kd-select" style="font-size:12px">'
             + headerOpts(meta[f.key] || '')
@@ -599,7 +599,7 @@ function buildBlock(idx, subjectId, subjectName, subjectCode, assessments, meta)
     leftCol.style.cssText = 'flex:1;min-width:360px';
 
     var leftLabel = document.createElement('div');
-    leftLabel.style.cssText = 'font-size:11px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.3rem';
+    leftLabel.style.cssText = 'font-size:11px;font-weight:700;color:var(--tertiary);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.3rem';
     leftLabel.textContent = 'Assessment columns';
     leftCol.appendChild(leftLabel);
 
@@ -635,7 +635,7 @@ function buildBlock(idx, subjectId, subjectName, subjectCode, assessments, meta)
     rightCol.style.minWidth = '280px';
 
     var rightLabel = document.createElement('div');
-    rightLabel.style.cssText = 'font-size:11px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.3rem';
+    rightLabel.style.cssText = 'font-size:11px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.3rem';
     rightLabel.textContent = 'Total / Grade / Remark / Position';
     rightCol.appendChild(rightLabel);
 
@@ -790,7 +790,7 @@ document.getElementById('kd-add-label-btn').addEventListener('click', function()
     tr.innerHTML =
         '<td><input type="text" name="shared_labels[]" value=""'
         + ' class="regular-text kd-shared-label" placeholder="e.g. Exam"></td>'
-        + '<td><button type="button" class="button button-small kd-remove-row">x</button></td>';
+        + '<td><button type="button" class="button button-small kd-remove-row">✕</button></td>';
     labelBody.appendChild(tr);
 });
 
