@@ -16,10 +16,12 @@
 						<option value="">— Choose —</option>
 						<option value="academic_records">Academic Records</option>
 						<option value="students">Students</option>
+						<option value="staff">Staff</option>
 					</select>
 					<p class="description">
 						<strong>Academic Records</strong> — imports subject scores, grades, and term summaries into existing students.<br>
-						<strong>Students</strong> — creates new student records from a list.
+						<strong>Students</strong> — creates new student records from a list.<br>
+						<strong>Staff</strong> — creates or updates staff records, including role, qualifications, and section/subject assignments.
 					</p>
 				</td>
 			</tr>
@@ -51,7 +53,7 @@
 
 <?php
 // Show existing profiles — FIX #2: add delete button
-$all_profiles = array_merge( $profiles_ar, $profiles_st );
+$all_profiles = array_merge( $profiles_ar, $profiles_st, $profiles_staff );
 if ( ! empty( $all_profiles ) ) : ?>
 <div class="kd-section">
 	<h3>Saved Profiles</h3>
@@ -85,13 +87,14 @@ if ( ! empty( $all_profiles ) ) : ?>
 	var profileRow    = document.getElementById('row-profile');
 	var profileSelect = document.getElementById('profile_id');
 
-	var arProfiles = <?php echo wp_json_encode( array_map( function($p){ return ['id'=>(int)$p['_ID'],'name'=>$p['profile_name']]; }, $profiles_ar ) ); ?>;
-	var stProfiles = <?php echo wp_json_encode( array_map( function($p){ return ['id'=>(int)$p['_ID'],'name'=>$p['profile_name']]; }, $profiles_st ) ); ?>;
+	var arProfiles    = <?php echo wp_json_encode( array_map( function($p){ return ['id'=>(int)$p['_ID'],'name'=>$p['profile_name']]; }, $profiles_ar ) ); ?>;
+	var stProfiles    = <?php echo wp_json_encode( array_map( function($p){ return ['id'=>(int)$p['_ID'],'name'=>$p['profile_name']]; }, $profiles_st ) ); ?>;
+	var staffProfiles = <?php echo wp_json_encode( array_map( function($p){ return ['id'=>(int)$p['_ID'],'name'=>$p['profile_name']]; }, $profiles_staff ) ); ?>;
 
 	typeSelect.addEventListener('change', function(){
 		var val = this.value;
 		profileSelect.innerHTML = '<option value="0">— Create a new profile —</option>';
-		var list = (val === 'academic_records') ? arProfiles : (val === 'students') ? stProfiles : [];
+		var list = (val === 'academic_records') ? arProfiles : (val === 'students') ? stProfiles : (val === 'staff') ? staffProfiles : [];
 		list.forEach(function(p){
 			var opt = document.createElement('option');
 			opt.value = p.id;
@@ -126,6 +129,7 @@ if ( ! empty( $all_profiles ) ) : ?>
 					// Also remove from profile dropdowns
 					arProfiles = arProfiles.filter(function(p){ return p.id != id; });
 					stProfiles = stProfiles.filter(function(p){ return p.id != id; });
+					staffProfiles = staffProfiles.filter(function(p){ return p.id != id; });
 				} else {
 					alert('Delete failed: ' + (res.data || 'Unknown error'));
 					btn.disabled = false;

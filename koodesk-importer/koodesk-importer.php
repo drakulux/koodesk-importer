@@ -72,6 +72,8 @@ add_action( 'plugins_loaded', function (): void {
 	$family_resolver = new Koodesk_Family_Resolver();
 	$importer        = new Koodesk_Importer( $transformer, $matcher, $family_resolver );
 	$import_history  = new Koodesk_Import_History();
+	$staff_matcher   = new Koodesk_Staff_Matcher();
+	$staff_importer  = new Koodesk_Staff_Importer( $staff_matcher );
 
 	// ── Admin UI ─────────────────────────────────────────────────────
 	// Instantiated on every request (not just is_admin()) so that the
@@ -86,7 +88,9 @@ add_action( 'plugins_loaded', function (): void {
 		$matcher,
 		$transformer,
 		$importer,
-		$import_history
+		$import_history,
+		$staff_matcher,
+		$staff_importer
 	);
 
 }, 15 ); // priority 15 — after JetEngine's own plugins_loaded (priority 10)

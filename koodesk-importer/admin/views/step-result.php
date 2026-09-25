@@ -1,11 +1,13 @@
 <?php if ( ! defined( 'ABSPATH' ) ) exit;
 /**
  * step-result.php
- * Variables: $result (import result array), $start_over_url
+ * Variables: $result (import result array), $start_over_url, $import_type
  */
 $has_errors   = ! empty( $result['errors'] );
 $has_warnings = ! empty( $result['warnings'] );
 $new_students = $result['new_students'] ?? [];
+$new_staff    = $result['new_staff'] ?? [];
+$is_staff     = ( $import_type ?? '' ) === 'staff';
 $import_log_key = $result['import_log_key'] ?? '';
 ?>
 
@@ -18,6 +20,13 @@ $import_log_key = $result['import_log_key'] ?? '';
     <div class="notice notice-warning" style="margin:0 0 1rem"><p><strong>Import finished with some errors — see below.</strong></p></div>
     <?php endif; ?>
 
+    <?php if ( $is_staff ) : ?>
+    <table class="kd-table" style="max-width:480px">
+        <tr><th>New staff created</th>   <td><?php echo intval( $result['staff_created'] ?? 0 ); ?></td></tr>
+        <tr><th>Existing staff updated</th><td><?php echo intval( $result['staff_updated'] ?? 0 ); ?></td></tr>
+        <tr><th>Rows skipped</th>        <td><?php echo intval( $result['rows_skipped'] ?? 0 ); ?></td></tr>
+    </table>
+    <?php else : ?>
     <table class="kd-table" style="max-width:480px">
         <tr><th>New students created</th>          <td><?php echo intval( $result['students_created'] ); ?></td></tr>
         <?php if ( ! empty( $result['families_created'] ) ) : ?>
@@ -32,8 +41,27 @@ $import_log_key = $result['import_log_key'] ?? '';
         <tr><th>Term summaries updated</th>        <td><?php echo intval( $result['summaries_updated'] ); ?></td></tr>
         <tr><th>Rows skipped</th>                  <td><?php echo intval( $result['rows_skipped'] ); ?></td></tr>
     </table>
+    <?php endif; ?>
 
-    <?php if ( ! empty( $new_students ) ) : ?>
+    <?php if ( $is_staff && ! empty( $new_staff ) ) : ?>
+    <div style="margin-top:1.5rem">
+        <h4>New Staff Created</h4>
+        <table class="kd-table" style="max-width:680px">
+            <thead><tr><th>Name</th><th>Role</th><th>Email</th></tr></thead>
+            <tbody>
+            <?php foreach ( $new_staff as $ns ) : ?>
+                <tr>
+                    <td><?php echo esc_html( $ns['full_name'] ); ?></td>
+                    <td><?php echo esc_html( $ns['role_name'] ?: '—' ); ?></td>
+                    <td><?php echo esc_html( $ns['email'] ?: '—' ); ?></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php endif; ?>
+
+    <?php if ( ! $is_staff && ! empty( $new_students ) ) : ?>
     <div style="margin-top:1.5rem">
         <h4>New Students Created — Save This Reference Sheet</h4>
         <p class="description">
@@ -112,8 +140,8 @@ $import_log_key = $result['import_log_key'] ?? '';
     </details>
     <?php endif; ?>
 
-    <!-- FIX #14: Reverse import option -->
-    <?php if ( $import_log_key ) : ?>
+    <!-- FIX #14: Reverse import option — not yet supported for staff imports -->
+    <?php if ( $import_log_key && ! $is_staff ) : ?>
     <div class="kd-section" style="margin-top:1.5rem;border-left:3px solid #d63638;background:var(--bg-body)">
         <h4 style="margin-top:0;color:#d63638">Undo This Import</h4>
         <p style="font-size:13px">
@@ -127,6 +155,10 @@ $import_log_key = $result['import_log_key'] ?? '';
             Reverse This Import
         </button>
         <span id="kd-reverse-status" style="margin-left:.75rem;font-size:13px"></span>
+    </div>
+    <?php elseif ( $is_staff ) : ?>
+    <div class="kd-notice" style="margin-top:1.5rem">
+        Undo isn't available for staff imports yet — double-check the results above before re-running.
     </div>
     <?php endif; ?>
 
@@ -146,7 +178,7 @@ $import_log_key = $result['import_log_key'] ?? '';
     </p>
 </div>
 
-<?php if ( $import_log_key ) : ?>
+<?php if ( $import_log_key && ! $is_staff ) : ?>
 <script>
 (function(){
     var btn    = document.getElementById('kd-reverse-btn');

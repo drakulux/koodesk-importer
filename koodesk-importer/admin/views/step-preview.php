@@ -3,7 +3,8 @@
  * step-preview.php
  * Variables: $import_type, $profile_id, $token, $mapping,
  *            $plan, $plan_counts, $decisions_token,
- *            $preview_issues, $total_mismatch_subjects, $start_over_url
+ *            $preview_issues, $total_mismatch_subjects, $start_over_url,
+ *            $zero_flags (['row_flags'=>[row_num=>true], 'subject_flags'=>[row_num=>[subject_name=>true]]])
  */
 $subject_count = count( $mapping['subjects'] ?? [] );
 $est_records   = $plan_counts['existing'] * $subject_count + $plan_counts['new'] * $subject_count;
@@ -14,10 +15,39 @@ foreach ( $preview_issues as $issue ) {
     if ( $issue['type'] === 'total_mismatch' ) $mismatch_count++;
 }
 $has_mismatches = ! empty( $total_mismatch_subjects );
+
+// ── Zero-score flags: build row_num => raw_name lookup from the plan ──────
+$zero_flags    = $zero_flags ?? [ 'row_flags' => [], 'subject_flags' => [] ];
+$row_flags     = $zero_flags['row_flags']     ?? [];
+$subject_flags = $zero_flags['subject_flags'] ?? [];
+$row_names     = [];
+foreach ( $plan as $p ) {
+    $row_names[ $p['row_num'] ] = $p['raw_name'];
+}
+$has_zero_flags = ! empty( $row_flags ) || ! empty( $subject_flags );
+// Rows that are fully flagged don't also need their per-subject flags listed
+// separately — the whole row is already excluded by default.
+$subject_flags_standalone = array_diff_key( $subject_flags, $row_flags );
+
+// Wording for the plan-counts table below — "student" for academic_records
+// (matching students to receive grades) and students-import, "staff" for
+// the staff import type.
+$noun_singular = ( $import_type === 'staff' ) ? 'staff member' : 'student';
+$noun_plural    = ( $import_type === 'staff' ) ? 'staff'        : 'students';
+$noun_plural_cap = ucfirst( $noun_plural );
 ?>
 
 <div class="kd-section">
     <h3>Step 5 — Confirm Import</h3>
+
+    <form method="post" id="kd-preview-form">
+        <input type="hidden" name="kd_step"           value="run_import">
+        <input type="hidden" name="kd_token"           value="<?php echo esc_attr( $token ); ?>">
+        <input type="hidden" name="import_type"        value="<?php echo esc_attr( $import_type ); ?>">
+        <input type="hidden" name="profile_id"         value="<?php echo esc_attr( $profile_id ); ?>">
+        <input type="hidden" name="kd_decisions_token" value="<?php echo esc_attr( $decisions_token ); ?>">
+        <input type="hidden" name="total_resolution"   value="csv" id="kd-total-resolution">
+        <?php wp_nonce_field( 'kd_run_import', 'kd_import_nonce' ); ?>
 
     <!-- Existing records warning -->
     <?php if ( ! empty( $existing_records ) ) : ?>
@@ -46,6 +76,67 @@ $has_mismatches = ! empty( $total_mismatch_subjects );
     </div>
     <?php endif; ?>
 
+    <!-- Zero-score flags -->
+    <?php if ( $has_zero_flags ) : ?>
+    <div class="kd-notice kd-notice--warning" style="margin-bottom:1.25rem">
+        <strong>⚠ Zero-score rows/subjects flagged</strong>
+        <p style="margin:.5rem 0 0;font-size:13px">
+            These students scored zero on every assessment for the subject(s) listed — likely they
+            didn't sit that subject (or weren't present that term). They are <strong>excluded from
+            this import by default</strong>. Tick any you want to include anyway.
+        </p>
+
+        <?php if ( ! empty( $row_flags ) ) : ?>
+        <div style="margin-top:.75rem">
+            <strong style="font-size:12px">Whole row flagged (all mapped subjects scored zero)</strong>
+            <table class="kd-table" style="margin-top:.4rem;max-width:520px">
+                <thead><tr><th style="width:60px">Row</th><th>Student</th><th style="width:140px">Include anyway?</th></tr></thead>
+                <tbody>
+                <?php foreach ( $row_flags as $row_num => $_ ) : ?>
+                <tr>
+                    <td><?php echo intval( $row_num ); ?></td>
+                    <td><?php echo esc_html( $row_names[ $row_num ] ?? '—' ); ?></td>
+                    <td>
+                        <label style="font-weight:normal;font-size:12px">
+                            <input type="checkbox" name="zero_include[rows][<?php echo intval( $row_num ); ?>]" value="1">
+                            Include
+                        </label>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+        <?php endif; ?>
+
+        <?php if ( ! empty( $subject_flags_standalone ) ) : ?>
+        <div style="margin-top:.9rem">
+            <strong style="font-size:12px">Individual subject(s) flagged</strong>
+            <table class="kd-table" style="margin-top:.4rem;max-width:620px">
+                <thead><tr><th style="width:60px">Row</th><th>Student</th><th>Subject</th><th style="width:140px">Include anyway?</th></tr></thead>
+                <tbody>
+                <?php foreach ( $subject_flags_standalone as $row_num => $subjects ) : ?>
+                    <?php foreach ( $subjects as $subject_name => $_ ) : ?>
+                    <tr>
+                        <td><?php echo intval( $row_num ); ?></td>
+                        <td><?php echo esc_html( $row_names[ $row_num ] ?? '—' ); ?></td>
+                        <td><?php echo esc_html( $subject_name ); ?></td>
+                        <td>
+                            <label style="font-weight:normal;font-size:12px">
+                                <input type="checkbox" name="zero_include[subjects][<?php echo intval( $row_num ); ?>][<?php echo esc_attr( $subject_name ); ?>]" value="1">
+                                Include
+                            </label>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
+
     <?php if ( $has_mismatches ) : ?>
     <div class="kd-notice kd-notice--warning" style="margin-bottom:1.25rem">
         <strong>⚠ Score total mismatches detected</strong>
@@ -54,14 +145,14 @@ $has_mismatches = ! empty( $total_mismatch_subjects );
             does not match the sum of individual assessment scores. Choose how to handle it below.
         </p>
     </div>
-    <?php else : ?>
+    <?php elseif ( ! $has_zero_flags ) : ?>
     <p style="color:#0a5c2e;font-weight:500">✓ No score issues detected. Review the summary below and click <strong>Run Import</strong> to proceed.</p>
     <?php endif; ?>
 
     <!-- FIX #4: Enhanced preview table -->
     <table class="kd-table" style="max-width:520px">
-        <tr><th>Students matched to existing</th><td><?php echo intval( $plan_counts['existing'] ); ?></td></tr>
-        <tr><th>New students to create</th>       <td><?php echo intval( $plan_counts['new'] ); ?></td></tr>
+        <tr><th><?php echo esc_html( $noun_plural_cap ); ?> matched to existing</th><td><?php echo intval( $plan_counts['existing'] ); ?></td></tr>
+        <tr><th>New <?php echo esc_html( $noun_plural ); ?> to create</th>       <td><?php echo intval( $plan_counts['new'] ); ?></td></tr>
         <tr><th>Rows to skip</th>                 <td><?php echo intval( $plan_counts['skip'] ); ?></td></tr>
         <?php if ( $import_type === 'academic_records' ) : ?>
         <tr><th>Subjects mapped</th>              <td><?php echo intval( $subject_count ); ?></td></tr>
@@ -71,6 +162,12 @@ $has_mismatches = ! empty( $total_mismatch_subjects );
         <tr style="background:#fff9e6">
             <th style="color:#664d03">⚠ Total mismatches</th>
             <td style="color:#664d03"><?php echo count( $total_mismatch_subjects ); ?> subject(s)</td>
+        </tr>
+        <?php endif; ?>
+        <?php if ( $has_zero_flags ) : ?>
+        <tr style="background:#fff9e6">
+            <th style="color:#664d03">⚠ Zero-score rows flagged</th>
+            <td style="color:#664d03"><?php echo count( $row_flags ); ?> row(s), <?php echo count( $subject_flags_standalone ); ?> row(s) with a flagged subject</td>
         </tr>
         <?php endif; ?>
         <?php endif; ?>
@@ -184,20 +281,11 @@ $has_mismatches = ! empty( $total_mismatch_subjects );
     </details>
     <?php endif; ?>
 
-    <form method="post" style="margin-top:1.5rem">
-        <input type="hidden" name="kd_step"           value="run_import">
-        <input type="hidden" name="kd_token"           value="<?php echo esc_attr( $token ); ?>">
-        <input type="hidden" name="import_type"        value="<?php echo esc_attr( $import_type ); ?>">
-        <input type="hidden" name="profile_id"         value="<?php echo esc_attr( $profile_id ); ?>">
-        <input type="hidden" name="kd_decisions_token" value="<?php echo esc_attr( $decisions_token ); ?>">
-        <input type="hidden" name="total_resolution"   value="csv" id="kd-total-resolution">
-        <?php wp_nonce_field( 'kd_run_import', 'kd_import_nonce' ); ?>
-
-        <p class="submit">
-            <button type="submit" class="button button-primary button-hero">Run Import</button>
-            <button type="submit" name="kd_step" value="match" class="button kd-back-btn" formnovalidate>← Back to Match Students</button>
-            <a href="<?php echo esc_url( $start_over_url ); ?>" class="button">Start Over</a>
-        </p>
+    <p class="submit" style="margin-top:1.5rem">
+        <button type="submit" class="button button-primary button-hero">Run Import</button>
+        <button type="submit" name="kd_step" value="match" class="button kd-back-btn" formnovalidate>← Back to Match <?php echo esc_html( $noun_plural_cap ); ?></button>
+        <a href="<?php echo esc_url( $start_over_url ); ?>" class="button">Start Over</a>
+    </p>
     </form>
 </div>
 

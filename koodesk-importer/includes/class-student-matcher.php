@@ -229,17 +229,34 @@ class Koodesk_Student_Matcher {
 	// -------------------------------------------------------------------------
 
 	/**
-	 * Split a full name into first_name and last_name.
-	 * Rule: last word = last_name, everything else = first_name.
+	 * Split a full name into first_name and last_name. This is inherently a
+	 * best-effort guess whenever only a combined Full Name column is
+	 * available — there's no reliable way to detect middle names, or which
+	 * end of the name is the surname, from the string alone. The $order
+	 * parameter lets the admin tell us which convention their file uses
+	 * (defaults to 'first_first' for backward compatibility with mapping
+	 * profiles saved before this option existed):
 	 *
-	 * "AHMED FIRDAUSI"          → first: "AHMED",         last: "FIRDAUSI"
-	 * "IBRAHIM MUHAMMAD KAITA"  → first: "IBRAHIM MUHAMMAD", last: "KAITA"
-	 * "BELLO"                   → first: "BELLO",         last: ""
+	 *   'first_first' (default) — last word = surname, everything before it
+	 *     is treated as the given name(s) (so a middle name, if present,
+	 *     ends up folded into first_name — there's no dedicated field for
+	 *     it in the CCT schema).
+	 *     "AHMED FIRDAUSI"          → first: "AHMED",           last: "FIRDAUSI"
+	 *     "IBRAHIM MUHAMMAD KAITA"  → first: "IBRAHIM MUHAMMAD", last: "KAITA"
+	 *
+	 *   'last_first' — first word = surname, everything after it is the
+	 *     given name(s). For schools/records where the surname is written
+	 *     first.
+	 *     "OKAFOR CHIDINMA"         → first: "CHIDINMA", last: "OKAFOR"
+	 *
+	 *   Either way, a single-word name has no surname to extract — it's
+	 *   used as first_name with last_name left blank.
 	 *
 	 * @param string $full_name
+	 * @param string $order 'first_first' | 'last_first'
 	 * @return array [ 'first_name' => string, 'last_name' => string, 'full_name' => string ]
 	 */
-	public function split_name( string $full_name ): array {
+	public function split_name( string $full_name, string $order = 'first_first' ): array {
 		$name = trim( $full_name );
 		if ( $name === '' ) {
 			return [ 'first_name' => '', 'last_name' => '', 'full_name' => '' ];
@@ -251,8 +268,13 @@ class Koodesk_Student_Matcher {
 			return [ 'first_name' => $parts[0], 'last_name' => '', 'full_name' => $name ];
 		}
 
-		$last_name  = array_pop( $parts );
-		$first_name = implode( ' ', $parts );
+		if ( $order === 'last_first' ) {
+			$last_name  = array_shift( $parts );
+			$first_name = implode( ' ', $parts );
+		} else {
+			$last_name  = array_pop( $parts );
+			$first_name = implode( ' ', $parts );
+		}
 
 		return [
 			'first_name' => $first_name,

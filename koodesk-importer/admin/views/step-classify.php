@@ -5,11 +5,19 @@
 
 $ar_student_fields = [
 	'full_name'            => 'Student Name',
+	'first_name'           => 'First Name (used if a new student record has to be created)',
+	'last_name'            => 'Last Name (used if a new student record has to be created)',
 	'external_student_key' => 'Admission / Student ID',
 	'current_class_name'   => 'Class',
+	'gender'               => 'Gender (used if a new student record has to be created)',
+	'date_of_birth'        => 'Date of Birth (used if a new student record has to be created)',
+	'enrollment_term'      => 'Enrollment Term (optional — defaults to this record\'s own term)',
+	'enrollment_session'   => 'Enrollment Session (optional — defaults to this record\'s own session)',
 ];
 $st_student_fields = [
 	'full_name'            => 'Full Name',
+	'first_name'           => 'First Name',
+	'last_name'            => 'Last Name',
 	'gender'               => 'Gender',
 	'date_of_birth'        => 'Date of Birth',
 	'current_class_name'   => 'Class',
@@ -20,6 +28,10 @@ $st_student_fields = [
 	'religion'             => 'Religion',
 	'genotype'             => 'Genotype',
 	'phone_number'         => 'Phone Number',
+	'address'              => 'Student Address (if different from family)',
+	'registration_date'    => 'Registration Date',
+	'enrollment_term'      => 'Enrollment Term (optional — defaults to current system term)',
+	'enrollment_session'   => 'Enrollment Session (optional — defaults to current system session)',
 ];
 $student_fields = ( $import_type === 'academic_records' ) ? $ar_student_fields : $st_student_fields;
 
@@ -38,6 +50,7 @@ $summary_db_fields = [
 	'position_in_class'  => 'Position in Class',
 	'teacher_remark'     => 'Teacher Remark',
 	'principal_remark'   => 'Principal Remark',
+	'class_teacher'      => 'Class Teacher / Form Tutor',
 	'total_marks'        => 'Total Marks Obtainable',
 	'attendance_present' => 'Attendance (days present)',
 ];
@@ -69,6 +82,16 @@ if ( $pm ) {
 	if ( ! empty( $pm['term_col'] ) )    $suggest['term']    = $pm['term_col'];
 	if ( ! empty( $pm['session_col'] ) ) $suggest['session'] = $pm['session_col'];
 	foreach ( $pm['summary_fields'] ?? [] as $col => $db ) $suggest[ $db ] = $col;
+}
+
+// Which name mode a saved profile actually used, so the Full Name /
+// First & Last toggle below defaults to match it rather than always
+// defaulting to Full Name.
+$name_mode_default = 'full_name';
+if ( $pm ) {
+	$has_first_last = isset( $suggest['first_name'] ) || isset( $suggest['last_name'] );
+	$has_full        = isset( $suggest['full_name'] );
+	if ( $has_first_last && ! $has_full ) $name_mode_default = 'first_last';
 }
 
 // Guardian auto-detect
@@ -133,13 +156,27 @@ foreach ( $suggestions as $s ) {
 	}
 }
 
-// Shared assessment labels from classifier
+// Shared assessment labels from classifier (label + max score pairs).
+// max score defaults to 0 (blank) unless a saved profile already had one
+// stored in assessment_max_scores.
 $detected_labels = [];
 foreach ( $suggestions as $s ) {
 	$lbl = $s['assessment_hint'] ?? '';
-	if ( $lbl && ! in_array( $lbl, $detected_labels ) ) $detected_labels[] = $lbl;
+	if ( $lbl && ! in_array( $lbl, $detected_labels, true ) ) $detected_labels[] = $lbl;
+}
+$profile_max_scores = $pm['assessment_max_scores'] ?? [];
+if ( $pm && ! empty( $pm['subjects'][0]['assessments'] ) && empty( $detected_labels ) ) {
+	// No classifier hints (e.g. re-loading a profile against a differently
+	// formatted CSV) — fall back to the labels the saved profile used.
+	foreach ( $pm['subjects'][0]['assessments'] as $a ) {
+		$lbl = $a['label'] ?? '';
+		if ( $lbl && ! in_array( $lbl, $detected_labels, true ) ) $detected_labels[] = $lbl;
+	}
 }
 if ( empty( $detected_labels ) ) $detected_labels = [ '', '' ];
+$detected_label_pairs = array_map( function( $lbl ) use ( $profile_max_scores ) {
+	return [ 'label' => $lbl, 'max_score' => $profile_max_scores[ $lbl ] ?? '' ];
+}, $detected_labels );
 
 function kd_header_select( string $name, string $selected, array $headers, string $attrs = '' ): string {
 	$html  = '<select name="' . esc_attr( $name ) . '" class="kd-select"' . ( $attrs ? " $attrs" : '' ) . '>';
@@ -162,10 +199,6 @@ $editing_saved = ( $profile_id > 0 && $pm !== null );
 			<strong><?php echo count( $headers ); ?> columns · <?php echo intval( $parsed['filtered_row_count'] ); ?> student rows</strong>
 			<span style="color:#666;font-size:12px">&nbsp;(<?php echo intval( $parsed['raw_row_count'] - $parsed['filtered_row_count'] ); ?> empty rows filtered)</span>
 		</span>
-		<span style="font-size:12px;color:#666;background:#f6f7f7;padding:3px 9px;border-radius:10px;border:1px solid #dcdcde">
-			<span style="display:inline-block;width:10px;height:10px;background:#f0f0f1;border:1px solid #c3c4c7;border-radius:2px;vertical-align:middle;margin-right:3px"></span>
-			 greyed out in dropdown = column already mapped elsewhere
-		</span>
 	</p>
 
 	<form method="post" id="kd-classify-form">
@@ -177,32 +210,41 @@ $editing_saved = ( $profile_id > 0 && $pm !== null );
 		<?php endif; ?>
 		<?php wp_nonce_field( 'kd_classify', 'kd_classify_nonce' ); ?>
 
-		<?php if ( $import_type === 'academic_records' && ! empty( $templates ) ) : ?>
-		<p style="margin-bottom:1rem"><label><strong>Assessment Template (optional)</strong><br>
-			<select name="assessment_template_id" class="regular-text">
-				<option value="0">— None —</option>
-				<?php foreach ( $templates as $tpl ) : ?>
-					<option value="<?php echo esc_attr( $tpl['_ID'] ); ?>"><?php echo esc_html( $tpl['title'] ?? 'Template #' . $tpl['_ID'] ); ?></option>
-				<?php endforeach; ?>
-			</select></label>
-		</p>
-		<?php endif; ?>
-
 		<!-- ── 1. Student / Context fields ──────────────────────────── -->
 		<div class="kd-section" style="margin-top:1rem">
 			<h4 style="margin-top:0"><?php echo $import_type === 'academic_records' ? 'Student &amp; Context Fields' : 'Student Fields'; ?></h4>
+
+			<div style="margin-bottom:.9rem">
+				<strong style="font-size:13px;display:block;margin-bottom:.35rem">How is the student's name provided in your file?</strong>
+				<label style="margin-right:1.25rem;font-weight:normal;font-size:13px">
+					<input type="radio" name="name_mode" value="full_name" id="kd-name-mode-full"<?php checked( $name_mode_default, 'full_name' ); ?>>
+					Single "Full Name" column
+				</label>
+				<label style="font-weight:normal;font-size:13px">
+					<input type="radio" name="name_mode" value="first_last" id="kd-name-mode-split"<?php checked( $name_mode_default, 'first_last' ); ?>>
+					Separate "First Name" + "Last Name" columns
+				</label>
+				<p class="description" style="margin:.4rem 0 0;font-size:11px">
+					With a single Full Name column, it's stored as-is — First/Last Name are left blank rather than guessed apart, since nothing else in the system uses them independently of Full Name.
+				</p>
+			</div>
+
 			<table class="kd-table" style="max-width:680px">
 				<thead><tr><th style="width:200px">Field</th><th>CSV Column</th><th style="width:160px">Detected</th></tr></thead>
 				<tbody>
 				<?php
-				$required_fields = $import_type === 'academic_records' ? [ 'full_name', 'current_class_name', 'term', 'session' ] : [ 'full_name' ];
+				$required_fields = $import_type === 'academic_records'
+					? [ 'full_name', 'first_name', 'last_name', 'current_class_name', 'term', 'session' ]
+					: [ 'full_name', 'first_name', 'last_name' ];
 				$fields = $student_fields;
 				if ( $import_type === 'academic_records' ) { $fields['term'] = 'Term'; $fields['session'] = 'Session'; }
+				$name_field_modes = [ 'full_name' => 'full_name', 'first_name' => 'first_last', 'last_name' => 'first_last' ];
 				foreach ( $fields as $db_field => $label ) :
 					$suggested = $suggest[ $db_field ] ?? '';
 					$required  = in_array( $db_field, $required_fields, true );
+					$name_mode_attr = isset( $name_field_modes[ $db_field ] ) ? ' data-kd-name-field="' . esc_attr( $name_field_modes[ $db_field ] ) . '"' : '';
 				?>
-				<tr>
+				<tr<?php echo $name_mode_attr; ?>>
 					<td><strong><?php echo esc_html( $label ); ?></strong><?php if ( $required ) echo ' <span style="color:#a00">*</span>'; ?></td>
 					<td>
 					<?php if ( $db_field === 'current_class_name' && ! empty( $system_classes ) ) : ?>
@@ -226,18 +268,55 @@ $editing_saved = ( $profile_id > 0 && $pm !== null );
 			<?php if ( $import_type === 'academic_records' ) echo '<p class="description" style="margin-top:.3rem"><span style="color:#a00">*</span> Required</p>'; ?>
 		</div>
 
+		<script>
+		(function(){
+		    var fullRadio    = document.getElementById('kd-name-mode-full');
+		    var splitRadio   = document.getElementById('kd-name-mode-split');
+
+		    function applyNameMode() {
+		        var mode = (splitRadio && splitRadio.checked) ? 'first_last' : 'full_name';
+		        document.querySelectorAll('[data-kd-name-field]').forEach(function(tr) {
+		            var show = tr.getAttribute('data-kd-name-field') === mode;
+		            tr.style.display = show ? '' : 'none';
+		            if (!show) {
+		                var sel = tr.querySelector('select');
+		                if (sel) sel.value = ''; // don't submit a stale mapping for the hidden mode
+		            }
+		        });
+		    }
+
+		    if (fullRadio)  fullRadio.addEventListener('change', applyNameMode);
+		    if (splitRadio) splitRadio.addEventListener('change', applyNameMode);
+		    applyNameMode();
+		})();
+		</script>
+
 		<?php if ( $import_type === 'academic_records' ) : ?>
 
 		<!-- ── 2. Assessment labels ───────────────────────────────────── -->
 		<div class="kd-section" style="margin-top:1rem">
 			<h4 style="margin-top:0">Assessment Labels <span style="font-weight:normal;font-size:12px;color:#666">— define once, shared by all subjects</span></h4>
-			<p class="description">e.g. <strong>1st CA</strong>, <strong>2nd CA</strong>, <strong>Exam</strong> — these labels appear under each subject below.</p>
-			<table class="kd-table" style="max-width:360px">
-				<thead><tr><th>Label</th><th style="width:40px"></th></tr></thead>
+
+			<?php if ( ! empty( $templates ) ) : ?>
+			<p style="margin-bottom:1rem"><label><strong>Assessment Template (optional)</strong><br>
+				<select name="assessment_template_id" id="kd-template-select" class="regular-text">
+					<option value="0">— None —</option>
+					<?php foreach ( $templates as $tpl ) : ?>
+						<option value="<?php echo esc_attr( $tpl['_ID'] ); ?>"><?php echo esc_html( $tpl['title'] ?? 'Template #' . $tpl['_ID'] ); ?></option>
+					<?php endforeach; ?>
+				</select></label>
+				<span class="description" style="display:block;margin-top:.3rem">Picking a template fills in the labels and max scores below — edit them after if needed.</span>
+			</p>
+			<?php endif; ?>
+
+			<p class="description">e.g. <strong>1st CA</strong>, <strong>2nd CA</strong>, <strong>Exam</strong> — these labels appear under each subject below. <strong>Max Score</strong> is applied to every subject's assessment with that label (schools typically use the same max score per label across all subjects) — leave blank if you don't want a max score tracked.</p>
+			<table class="kd-table" style="max-width:460px">
+				<thead><tr><th>Label</th><th style="width:110px">Max Score</th><th style="width:40px"></th></tr></thead>
 				<tbody id="kd-labels-body">
-				<?php foreach ( $detected_labels as $lbl ) : ?>
+				<?php foreach ( $detected_label_pairs as $pair ) : ?>
 				<tr>
-					<td><input type="text" name="shared_labels[]" value="<?php echo esc_attr( $lbl ); ?>" class="regular-text kd-shared-label" placeholder="e.g. 1st CA"></td>
+					<td><input type="text" name="shared_labels[]" value="<?php echo esc_attr( $pair['label'] ); ?>" class="regular-text kd-shared-label" placeholder="e.g. 1st CA"></td>
+					<td><input type="number" min="0" step="any" name="shared_label_max[]" value="<?php echo esc_attr( $pair['max_score'] ); ?>" class="regular-text kd-shared-label-max" placeholder="e.g. 30"></td>
 					<td><button type="button" class="button button-small kd-remove-row">✕</button></td>
 				</tr>
 				<?php endforeach; ?>
@@ -417,6 +496,22 @@ $_js_existing_profile_names = $existing_profile_names ?? [];
 $_js_ajax_url               = admin_url( 'admin-ajax.php' );
 $_js_nonce                  = wp_create_nonce( 'kd_classify_subject' );
 $_js_token                  = $token;
+
+// Assessment templates — label + max_score pairs per template, keyed by
+// template _ID, used to pre-fill the shared Assessment Labels table when
+// the admin picks a template from the dropdown above.
+$_js_templates = [];
+foreach ( $templates ?? [] as $_tpl ) {
+    $_types = $_tpl['assessment_types'] ?? [];
+    $_pairs = [];
+    foreach ( $_types as $_t ) {
+        $_pairs[] = [
+            'label'     => $_t['label'] ?? '',
+            'max_score' => isset( $_t['max_score'] ) ? (float) $_t['max_score'] : '',
+        ];
+    }
+    $_js_templates[ (int) $_tpl['_ID'] ] = $_pairs;
+}
 ?>
 
 <script>
@@ -429,6 +524,7 @@ var subjects             = <?php echo wp_json_encode( $_js_subjects ); ?>;
 var preFilled            = <?php echo wp_json_encode( $_js_prefilled ); ?>;
 var classifierDetected   = <?php echo wp_json_encode( $_js_classifier_detected ); ?>;
 var existingProfileNames = <?php echo wp_json_encode( $_js_existing_profile_names ); ?>;
+var templates             = <?php echo wp_json_encode( $_js_templates ); ?>;
 var ajaxUrl              = <?php echo wp_json_encode( $_js_ajax_url ); ?>;
 var nonce                = <?php echo wp_json_encode( $_js_nonce ); ?>;
 var token                = <?php echo wp_json_encode( $_js_token ); ?>;
@@ -785,14 +881,54 @@ document.addEventListener('click', function(e) {
 });
 
 document.getElementById('kd-add-label-btn').addEventListener('click', function() {
+    addLabelRow('', '');
+});
+
+function addLabelRow(label, maxScore) {
     var labelBody = document.getElementById('kd-labels-body');
     var tr = document.createElement('tr');
-    tr.innerHTML =
-        '<td><input type="text" name="shared_labels[]" value=""'
-        + ' class="regular-text kd-shared-label" placeholder="e.g. Exam"></td>'
-        + '<td><button type="button" class="button button-small kd-remove-row">✕</button></td>';
+    var labelInput = document.createElement('input');
+    labelInput.type = 'text';
+    labelInput.name = 'shared_labels[]';
+    labelInput.value = label || '';
+    labelInput.className = 'regular-text kd-shared-label';
+    labelInput.placeholder = 'e.g. Exam';
+
+    var maxInput = document.createElement('input');
+    maxInput.type = 'number';
+    maxInput.min = '0';
+    maxInput.step = 'any';
+    maxInput.name = 'shared_label_max[]';
+    maxInput.value = (maxScore === '' || maxScore == null) ? '' : maxScore;
+    maxInput.className = 'regular-text kd-shared-label-max';
+    maxInput.placeholder = 'e.g. 30';
+
+    var removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'button button-small kd-remove-row';
+    removeBtn.textContent = '✕';
+
+    var td1 = document.createElement('td'); td1.appendChild(labelInput);
+    var td2 = document.createElement('td'); td2.appendChild(maxInput);
+    var td3 = document.createElement('td'); td3.appendChild(removeBtn);
+    tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
     labelBody.appendChild(tr);
-});
+}
+
+// ── Assessment Template select: pre-fill the shared labels table ─────────
+var templateSelect = document.getElementById('kd-template-select');
+if (templateSelect) {
+    templateSelect.addEventListener('change', function() {
+        var pairs = templates[this.value];
+        if (!pairs || !pairs.length) return;
+
+        var labelBody = document.getElementById('kd-labels-body');
+        labelBody.innerHTML = '';
+        pairs.forEach(function(p) {
+            addLabelRow(p.label, p.max_score);
+        });
+    });
+}
 
 // ── Save-profile checkbox ─────────────────────────────────────────────────
 var saveChk   = document.getElementById('kd-save-profile-chk');

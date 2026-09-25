@@ -25,6 +25,7 @@
  *   "term_col": "Term",
  *   "session_col": "Session",
  *   "term_value_map": { "First": 1, "Second": 2, "Third": 3 },
+ *   "assessment_max_scores": { "1st CA": 30, "2nd CA": 30, "Exam": 40 },
  *   "subjects": [
  *     {
  *       "subject_id": 1,
@@ -286,10 +287,12 @@ class Koodesk_Profile_Manager {
 
 			// Must have a way to identify students
 			$student_fields = $mapping['student_fields'] ?? [];
-			$has_name = in_array( 'full_name', $student_fields, true );
+			$has_name = in_array( 'full_name', $student_fields, true )
+				|| in_array( 'first_name', $student_fields, true )
+				|| in_array( 'last_name',  $student_fields, true );
 			$has_key  = in_array( 'external_student_key', $student_fields, true );
 			if ( ! $has_name && ! $has_key ) {
-				$errors[] = 'No student identifier mapped. Map either "Full Name" or "External Student Key".';
+				$errors[] = 'No student identifier mapped. Map either "Full Name" (or First/Last Name) or "External Student Key".';
 			}
 
 			// Must have term and session columns
@@ -303,8 +306,20 @@ class Koodesk_Profile_Manager {
 
 		if ( $import_type === 'students' ) {
 			$student_fields = $mapping['student_fields'] ?? [];
-			if ( ! in_array( 'full_name', $student_fields, true ) ) {
-				$errors[] = 'No Name column mapped. The student name is required.';
+			$has_name = in_array( 'full_name', $student_fields, true )
+				|| in_array( 'first_name', $student_fields, true )
+				|| in_array( 'last_name',  $student_fields, true );
+			if ( ! $has_name ) {
+				$errors[] = 'No Name column mapped. Map either "Full Name" or First/Last Name — the student name is required.';
+			}
+		}
+
+		if ( $import_type === 'staff' ) {
+			$staff_fields = $mapping['staff_fields'] ?? [];
+			$has_first_last = in_array( 'first_name', $staff_fields, true ) || in_array( 'last_name', $staff_fields, true );
+			$has_full_name  = in_array( 'full_name', $staff_fields, true );
+			if ( ! $has_first_last && ! $has_full_name ) {
+				$errors[] = 'No name column mapped. Map either "Full Name" or First/Last Name — the staff name is required.';
 			}
 		}
 

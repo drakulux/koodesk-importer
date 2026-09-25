@@ -23,6 +23,34 @@ class Koodesk_Admin_UI {
 	private static bool $css_printed = false;
 	const TRANSIENT_TTL = 3600; // 1 hour
 
+	/**
+	 * Rows processed per AJAX call during a chunked/batched import run.
+	 * Mirrors the payroll batch generator's chunk size (15) elsewhere in
+	 * Koodesk — small enough to comfortably avoid PHP max_execution_time
+	 * on shared hosting even when a row triggers several CCT writes
+	 * (student/staff record + relations + academic records).
+	 */
+	const IMPORT_CHUNK_SIZE = 15;
+
+	/**
+	 * Tracks which step was actually rendered in the current request.
+	 * Step methods set this at their own entry point, so if a step falls
+	 * back to an earlier step (e.g. validation failure on context_confirm
+	 * falling back to classify), the LAST step method entered wins — which
+	 * is the step whose content actually ended up on screen. The step
+	 * indicator is rendered from this property, not from the raw posted
+	 * kd_step, so the indicator never shows a step ahead of the content.
+	 */
+	private string $rendered_step = 'upload';
+
+	/**
+	 * The import_type of the step actually rendered (see $rendered_step) —
+	 * set alongside it inside each step_* method as soon as $import_type is
+	 * known there. Used only to pick the right wording for the step
+	 * indicator labels (e.g. "Match Staff" vs "Match Students").
+	 */
+	private string $rendered_import_type = '';
+
 	/** @var Koodesk_File_Reader */
 	private Koodesk_File_Reader $file_reader;
 	/** @var Koodesk_Profile_Manager */
@@ -37,6 +65,10 @@ class Koodesk_Admin_UI {
 	private Koodesk_Importer $importer;
 	/** @var Koodesk_Import_History */
 	private Koodesk_Import_History $import_history;
+	/** @var Koodesk_Staff_Matcher */
+	private Koodesk_Staff_Matcher $staff_matcher;
+	/** @var Koodesk_Staff_Importer */
+	private Koodesk_Staff_Importer $staff_importer;
 
 	public function __construct(
 		Koodesk_File_Reader       $file_reader,
@@ -45,7 +77,9 @@ class Koodesk_Admin_UI {
 		Koodesk_Student_Matcher   $matcher,
 		Koodesk_Transformer       $transformer,
 		Koodesk_Importer          $importer,
-		Koodesk_Import_History    $import_history
+		Koodesk_Import_History    $import_history,
+		Koodesk_Staff_Matcher     $staff_matcher,
+		Koodesk_Staff_Importer    $staff_importer
 	) {
 		$this->file_reader     = $file_reader;
 		$this->profile_manager = $profile_manager;
@@ -54,6 +88,8 @@ class Koodesk_Admin_UI {
 		$this->transformer     = $transformer;
 		$this->importer        = $importer;
 		$this->import_history  = $import_history;
+		$this->staff_matcher   = $staff_matcher;
+		$this->staff_importer  = $staff_importer;
 
 		add_action( 'admin_menu', [ $this, 'register_menu' ] );
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_assets' ] );
@@ -71,6 +107,10 @@ class Koodesk_Admin_UI {
 		add_action( 'wp_ajax_nopriv_kd_render_step',   [ $this, 'ajax_render_step' ] );
 		add_action( 'wp_ajax_kd_delete_hist_entry',    [ $this, 'ajax_delete_hist_entry' ] );
 		add_action( 'wp_ajax_kd_clear_history',        [ $this, 'ajax_clear_history' ] );
+
+		// AJAX handler for chunked/batched import execution (progress modal)
+		add_action( 'wp_ajax_kd_process_import_batch',        [ $this, 'ajax_process_import_batch' ] );
+		add_action( 'wp_ajax_nopriv_kd_process_import_batch', [ $this, 'ajax_process_import_batch' ] );
 	}
 
 	public function register_menu(): void {
@@ -165,7 +205,7 @@ class Koodesk_Admin_UI {
 		}
 
 		$step = sanitize_key( $_POST['kd_step'] ?? 'upload' );
-		$this->render_step_indicator( $step );
+		$this->rendered_step = $step;
 
 		// FIX: "Start Over" on frontend returns to the same importer page
 		// Use the REQUEST_URI (stripping query/POST state) so it always works
@@ -175,6 +215,10 @@ class Koodesk_Admin_UI {
 		$uri_clean = strtok( $uri, '?' );
 		$this->current_page_url = $uri_clean ?: '/';
 
+		// Render the step body first so we know which step actually ended
+		// up on screen (a step method may fall back to an earlier step on
+		// validation failure), then render the indicator to match it.
+		ob_start();
 		switch ( $step ) {
 			case 'upload':          $this->step_upload();          break;
 			case 'classify':        $this->step_classify();        break;
@@ -184,6 +228,10 @@ class Koodesk_Admin_UI {
 			case 'run_import':      $this->step_run_import();      break;
 			default:                $this->step_upload();
 		}
+		$body = ob_get_clean();
+
+		$this->render_step_indicator( $this->rendered_step );
+		echo $body;
 
 		echo '</div>';
 
@@ -213,14 +261,17 @@ class Koodesk_Admin_UI {
 		}
 
 		$step = sanitize_key( $_POST['kd_step'] ?? $_GET['step'] ?? 'upload' );
+		$this->rendered_step = $step;
 
 		// FIX #1: set admin URL for start over
 		$this->current_page_url = '';
 
 		echo '<div class="wrap kd-importer">';
 		// heading removed
-		$this->render_step_indicator( $step );
 
+		// Render the body first so we can render the indicator against the
+		// step that actually ended up rendering (see $rendered_step docblock).
+		ob_start();
 		switch ( $step ) {
 			case 'upload':          $this->step_upload();          break;
 			case 'classify':        $this->step_classify();        break;
@@ -230,6 +281,10 @@ class Koodesk_Admin_UI {
 			case 'run_import':      $this->step_run_import();      break;
 			default:                $this->step_upload();
 		}
+		$body = ob_get_clean();
+
+		$this->render_step_indicator( $this->rendered_step );
+		echo $body;
 
 		echo '</div>';
 	}
@@ -239,13 +294,17 @@ class Koodesk_Admin_UI {
 	// -------------------------------------------------------------------------
 
 	private function step_upload(): void {
+		$this->rendered_step = 'upload';
+
 		$import_types = [
 			'academic_records' => 'Academic Records',
 			'students'         => 'Students',
+			'staff'            => 'Staff',
 		];
 
-		$profiles_ar = $this->profile_manager->get_profiles( 'academic_records' );
-		$profiles_st = $this->profile_manager->get_profiles( 'students' );
+		$profiles_ar    = $this->profile_manager->get_profiles( 'academic_records' );
+		$profiles_st    = $this->profile_manager->get_profiles( 'students' );
+		$profiles_staff = $this->profile_manager->get_profiles( 'staff' );
 		$start_over_url = $this->get_start_over_url();
 
 		include KOODESK_IMPORTER_VIEWS . 'step-upload.php';
@@ -256,7 +315,10 @@ class Koodesk_Admin_UI {
 	// -------------------------------------------------------------------------
 
 	private function step_classify(): void {
+		$this->rendered_step = 'classify';
+
 		$import_type = sanitize_key( $_POST['import_type'] ?? '' );
+		$this->rendered_import_type = $import_type;
 		$profile_id  = intval( $_POST['profile_id'] ?? 0 );
 		$token       = sanitize_key( $_POST['kd_token'] ?? '' );
 
@@ -285,7 +347,20 @@ class Koodesk_Admin_UI {
 			$saved_profile_mapping = $this->profile_manager->get_column_mapping( $profile_id );
 		}
 
-		$headers        = $parsed['headers'];
+		$headers = $parsed['headers'];
+
+		// Staff import has no subjects/assessments/classes concept, so it
+		// gets its own lightweight view instead of overloading the already
+		// large academic_records/students classify view.
+		if ( $import_type === 'staff' ) {
+			$pm = $saved_profile_mapping;
+			$existing_profiles      = $this->profile_manager->get_profiles( $import_type );
+			$existing_profile_names = array_map( fn($p) => $p['profile_name'], $existing_profiles );
+			$start_over_url = $this->get_start_over_url();
+			include KOODESK_IMPORTER_VIEWS . 'step-classify-staff.php';
+			return;
+		}
+
 		$known_subjects = $this->get_known_subjects();
 		$suggestions    = $this->classifier->classify( $headers, $known_subjects, $import_type );
 		$templates      = $this->get_assessment_templates();
@@ -307,7 +382,10 @@ class Koodesk_Admin_UI {
 	// -------------------------------------------------------------------------
 
 	private function step_context_confirm(): void {
+		$this->rendered_step = 'context_confirm';
+
 		$import_type = sanitize_key( $_POST['import_type'] ?? '' );
+		$this->rendered_import_type = $import_type;
 		$profile_id  = intval( $_POST['profile_id'] ?? 0 );
 		$token       = sanitize_key( $_POST['kd_token'] ?? '' );
 
@@ -328,7 +406,9 @@ class Koodesk_Admin_UI {
 		} elseif ( $profile_id === 0 ) {
 			// No save — store the mapping in a transient keyed to the session token.
 			// This avoids creating __temp_ profiles in the DB.
-			$mapping = $this->build_mapping_from_post();
+			$mapping = $import_type === 'staff'
+				? $this->build_staff_mapping_from_post()
+				: $this->build_mapping_from_post();
 			$errors  = $this->profile_manager->validate_mapping( $mapping, $import_type );
 			if ( ! empty( $errors ) ) {
 				foreach ( $errors as $e ) $this->show_error( $e );
@@ -357,6 +437,15 @@ class Koodesk_Admin_UI {
 			return;
 		}
 
+		// Staff has no term/session/subject concept — its own compact
+		// mapping-review view instead of the academic_records/students one.
+		if ( $import_type === 'staff' ) {
+			$profile_mapping = $mapping;
+			$start_over_url  = $this->get_start_over_url();
+			include KOODESK_IMPORTER_VIEWS . 'step-context-staff.php';
+			return;
+		}
+
 		$session_term_pairs = $this->file_reader->detect_session_term_values(
 			$parsed['rows'],
 			$mapping['session_col'] ?? '',
@@ -369,10 +458,38 @@ class Koodesk_Admin_UI {
 		// Pass mapping for the full review table
 		$profile_mapping = $mapping;
 
-		// Calculate total marks obtainable from subject count × 100
-		// so the context step can display it even when not mapped from CSV
+		// Calculate total marks obtainable (per student, summed across
+		// subjects for the term). Uses the real assessment_max_scores
+		// table when the admin filled one in on the Map Columns step —
+		// per subject, sum the max score of each of its assessments by
+		// label; any subject with no matched label falls back to the old
+		// flat assumption of 100 for that subject only, so a partially
+		// filled-in max-score table still gives a sensible blended estimate.
+		$assessment_max_scores    = $mapping['assessment_max_scores'] ?? [];
 		$subject_count_estimated  = count( $mapping['subjects'] ?? [] );
-		$total_marks_calculated   = $subject_count_estimated * 100;
+		$total_marks_calculated   = 0;
+		$subjects_using_real_max  = 0;
+
+		foreach ( $mapping['subjects'] ?? [] as $subj ) {
+			$subject_max = 0.0;
+			$matched_any = false;
+			foreach ( $subj['assessments'] ?? [] as $a ) {
+				$lbl = $a['label'] ?? '';
+				if ( $lbl !== '' && isset( $assessment_max_scores[ $lbl ] ) ) {
+					$subject_max += (float) $assessment_max_scores[ $lbl ];
+					$matched_any  = true;
+				}
+			}
+			if ( $matched_any ) {
+				$total_marks_calculated += $subject_max;
+				$subjects_using_real_max++;
+			} else {
+				$total_marks_calculated += 100; // unchanged flat fallback per subject
+			}
+		}
+
+		$total_marks_all_real_max = ( $subject_count_estimated > 0 && $subjects_using_real_max === $subject_count_estimated );
+		$total_marks_any_real_max = ( $subjects_using_real_max > 0 );
 
 		include KOODESK_IMPORTER_VIEWS . 'step-context.php';
 	}
@@ -382,7 +499,10 @@ class Koodesk_Admin_UI {
 	// -------------------------------------------------------------------------
 
 	private function step_match(): void {
+		$this->rendered_step = 'match';
+
 		$import_type = sanitize_key( $_POST['import_type'] ?? '' );
+		$this->rendered_import_type = $import_type;
 		$profile_id  = intval( $_POST['profile_id'] ?? 0 );
 		$token       = sanitize_key( $_POST['kd_token'] ?? '' );
 
@@ -398,13 +518,44 @@ class Koodesk_Admin_UI {
 			return;
 		}
 
-		$name_col    = array_search( 'full_name',            $mapping['student_fields'] ?? [], true ) ?: '';
+		if ( $import_type === 'staff' ) {
+			$email_col = array_search( 'staff_email', $mapping['staff_fields'] ?? [], true ) ?: '';
+
+			// Staff dedup matching runs against a combined full name, built
+			// the same dual-mode way run_import() will build it (First/Last
+			// columns if mapped, else split from a single Full Name column).
+			$combined_rows = array_map( function( $row ) use ( $mapping ) {
+				$row['__full_name'] = $this->staff_importer->resolve_row_full_name( $row, $mapping );
+				return $row;
+			}, $parsed['rows'] );
+
+			$this->staff_matcher->preload();
+			$match_results  = $this->staff_matcher->match_all( $combined_rows, '__full_name', $email_col );
+
+			$role_col       = $mapping['role_col'] ?? '';
+			$role_results   = $this->staff_matcher->match_all_roles( $parsed['rows'], $role_col );
+			$all_roles      = $this->staff_matcher->get_all_roles();
+
+			$matcher        = $this->staff_matcher;
+			$start_over_url = $this->get_start_over_url();
+			include KOODESK_IMPORTER_VIEWS . 'step-match-staff.php';
+			return;
+		}
+
 		$ext_key_col = array_search( 'external_student_key', $mapping['student_fields'] ?? [], true ) ?: '';
+
+		// Build a combined "__full_name" column per row so matching works
+		// identically regardless of whether the mapping used a single Full
+		// Name column or separate First/Last Name columns.
+		$combined_rows = array_map( function( $row ) use ( $mapping ) {
+			$row['__full_name'] = $this->importer->resolve_row_full_name( $row, $mapping );
+			return $row;
+		}, $parsed['rows'] );
 
 		// Run matching for both academic_records AND students
 		// (students import can update existing students with missing profile data)
 		$this->matcher->preload();
-		$match_results = $this->matcher->match_all( $parsed['rows'], $name_col, $ext_key_col );
+		$match_results = $this->matcher->match_all( $combined_rows, '__full_name', $ext_key_col );
 
 		$matcher = $this->matcher;
 		$start_over_url = $this->get_start_over_url();
@@ -416,10 +567,12 @@ class Koodesk_Admin_UI {
 	// -------------------------------------------------------------------------
 
 	private function step_preview(): void {
+		$this->rendered_step = 'preview';
+
 		$import_type    = sanitize_key( $_POST['import_type'] ?? '' );
+		$this->rendered_import_type = $import_type;
 		$profile_id     = intval( $_POST['profile_id'] ?? 0 );
 		$token          = sanitize_key( $_POST['kd_token'] ?? '' );
-		$match_decisions = $this->decode_match_decisions( $_POST['match'] ?? [] );
 
 		$mapping = $profile_id === -1
 			? get_transient( 'kd_temp_mapping_' . $token )
@@ -431,7 +584,30 @@ class Koodesk_Admin_UI {
 			return;
 		}
 
-		$name_col    = array_search( 'full_name',            $mapping['student_fields'] ?? [], true ) ?: '';
+		if ( $import_type === 'staff' ) {
+			$staff_decisions = $this->decode_staff_match_decisions( $_POST['match'] ?? [] );
+			$role_resolutions = $this->decode_role_resolutions( $_POST['role_match'] ?? [], $this->staff_matcher );
+
+			$plan = $this->staff_importer->prepare_import_plan( $parsed['rows'], $mapping, $staff_decisions );
+			$plan_counts = $this->count_plan( $plan );
+
+			$decisions_token = sanitize_key( 'kd_decisions_' . wp_generate_password( 12, false ) );
+			set_transient( $decisions_token, [ 'decisions' => $staff_decisions, 'roles' => $role_resolutions ], self::TRANSIENT_TTL );
+
+			$start_over_url = $this->get_start_over_url();
+			// Reuse the generic preview view — the academic-records-only
+			// sections (mismatches, zero-score flags, existing records,
+			// subjects table) are already guarded by $import_type checks.
+			$preview_issues = [];
+			$total_mismatch_subjects = [];
+			$zero_flags = [ 'row_flags' => [], 'subject_flags' => [] ];
+			$existing_records = [];
+			include KOODESK_IMPORTER_VIEWS . 'step-preview.php';
+			return;
+		}
+
+		$match_decisions = $this->decode_match_decisions( $_POST['match'] ?? [] );
+
 		$ext_key_col = array_search( 'external_student_key', $mapping['student_fields'] ?? [], true ) ?: '';
 
 		// FIX #4: Run a "dry" transform to detect issues before importing
@@ -439,13 +615,19 @@ class Koodesk_Admin_UI {
 			$parsed['rows'],
 			$mapping,
 			$match_decisions,
-			$name_col,
 			$ext_key_col,
 			$import_type
 		);
 
 		// FIX #4: Generate preview warnings (score mismatch, missing totals, etc.)
 		$preview_issues = $this->generate_preview_issues( $plan, $mapping, $parsed['rows'] );
+
+		// Zero-score flags — subjects/rows where every assessment came back 0,
+		// which are excluded from import by default unless the admin opts
+		// each one back in via the checkboxes rendered on this step.
+		$zero_flags = ( $import_type === 'academic_records' )
+			? $this->importer->detect_zero_score_flags( $plan, $mapping )
+			: [ 'row_flags' => [], 'subject_flags' => [] ];
 
 		$plan_counts = $this->count_plan( $plan );
 
@@ -469,11 +651,14 @@ class Koodesk_Admin_UI {
 	// -------------------------------------------------------------------------
 
 	private function step_run_import(): void {
+		$this->rendered_step = 'run_import';
+
 		if ( ! isset( $_POST['kd_import_nonce'] ) || ! wp_verify_nonce( $_POST['kd_import_nonce'], 'kd_run_import' ) ) {
 			wp_die( 'Security check failed.' );
 		}
 
 		$import_type      = sanitize_key( $_POST['import_type'] ?? '' );
+		$this->rendered_import_type = $import_type;
 		$profile_id       = intval( $_POST['profile_id'] ?? 0 );
 		$token            = sanitize_key( $_POST['kd_token'] ?? '' );
 		$decisions_token  = sanitize_key( $_POST['kd_decisions_token'] ?? '' );
@@ -481,44 +666,200 @@ class Koodesk_Admin_UI {
 		// FIX #3: total mismatch resolution — 'csv' or 'calculated'
 		$total_resolution = sanitize_key( $_POST['total_resolution'] ?? 'csv' );
 
+		// Zero-score overrides — rows/subjects the admin explicitly opted
+		// back INTO the import despite being flagged all-zero.
+		$zero_score_overrides = $this->decode_zero_score_overrides( $_POST['zero_include'] ?? [] );
+
 		$mapping = $profile_id === -1
 			? get_transient( 'kd_temp_mapping_' . $token )
 			: $this->profile_manager->get_column_mapping( $profile_id );
-		$parsed           = $this->load_parsed_file( $token );
-		$match_decisions  = get_transient( $decisions_token ) ?: [];
+		$parsed            = $this->load_parsed_file( $token );
+		$transient_payload = get_transient( $decisions_token ) ?: [];
 
 		if ( ! $mapping || ! $parsed ) {
 			$this->show_error( 'Session data missing. Please start the import again.' );
 			return;
 		}
 
-		$name_col    = array_search( 'full_name',            $mapping['student_fields'] ?? [], true ) ?: '';
-		$ext_key_col = array_search( 'external_student_key', $mapping['student_fields'] ?? [], true ) ?: '';
+		// Build the full plan up front — this is cheap (no CCT writes yet,
+		// just resolving each row's create/update/skip decision), so it's
+		// fine to do synchronously before handing off to the chunked runner.
+		if ( $import_type === 'staff' ) {
+			$staff_decisions  = $transient_payload['decisions'] ?? [];
+			$role_resolutions = $transient_payload['roles']     ?? [];
+			$plan = $this->staff_importer->prepare_import_plan( $parsed['rows'], $mapping, $staff_decisions );
+		} else {
+			$role_resolutions = [];
+			$match_decisions  = $transient_payload;
+			$ext_key_col = array_search( 'external_student_key', $mapping['student_fields'] ?? [], true ) ?: '';
+			$plan = $this->importer->prepare_import_plan(
+				$parsed['rows'],
+				$mapping,
+				$match_decisions,
+				$ext_key_col,
+				$import_type
+			);
+		}
 
-		$plan = $this->importer->prepare_import_plan(
-			$parsed['rows'],
-			$mapping,
-			$match_decisions,
-			$name_col,
-			$ext_key_col,
-			$import_type
-		);
+		// ── Chunked execution ──────────────────────────────────────────────
+		// The actual CCT writes (student/staff creation, academic records,
+		// relations, etc.) happen in ajax_process_import_batch(), one chunk
+		// at a time, driven by the progress-modal JS in
+		// step-run-import-progress.php. This keeps large rosters from
+		// timing out a single request and gives the admin a visible
+		// progress bar instead of a page that appears to hang.
+		$chunks = array_chunk( $plan, self::IMPORT_CHUNK_SIZE );
+		if ( empty( $chunks ) ) $chunks = [ [] ]; // still run once even for an empty plan, to finalize cleanly
 
-		// Pass total_resolution to importer
-		$result = $this->importer->run_import( $plan, $mapping, $total_resolution );
+		$batch_id = 'kd_batch_' . wp_generate_password( 20, false );
 
-		$this->profile_manager->touch( $profile_id );
+		set_transient( $batch_id, [
+			'import_type'          => $import_type,
+			'profile_id'           => $profile_id,
+			'token'                => $token,
+			'decisions_token'      => $decisions_token,
+			'mapping'              => $mapping,
+			'chunks'               => $chunks,
+			'chunk_index'          => 0,
+			'total_resolution'     => $total_resolution,
+			'zero_score_overrides' => $zero_score_overrides,
+			'role_resolutions'     => $role_resolutions,
+			'aggregated_result'    => [],
+		], self::TRANSIENT_TTL );
 
-		// Store import log in persistent history for undo from history page
-		$log_key = $this->store_import_log( $result, $import_type, $profile_id, $mapping );
-		$result['import_log_key'] = $log_key;
+		$total_rows      = count( $plan );
+		$total_chunks    = count( $chunks );
+		$chunk_size      = self::IMPORT_CHUNK_SIZE;
+		$batch_nonce     = wp_create_nonce( 'kd_process_import_batch' );
+		$is_staff_import = ( $import_type === 'staff' );
 
-		delete_transient( $decisions_token );
-		$this->cleanup_parsed_file( $token );
+		include KOODESK_IMPORTER_VIEWS . 'step-run-import-progress.php';
+	}
 
-		$start_over_url = $this->get_start_over_url();
-		$history_url    = $this->find_history_page_url();
-		include KOODESK_IMPORTER_VIEWS . 'step-result.php';
+	// -------------------------------------------------------------------------
+	// AJAX: Chunked import execution (progress-modal driven)
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Process one chunk of a batched import. Called repeatedly by the
+	 * progress-modal JS in step-run-import-progress.php until 'done' comes
+	 * back true, at which point the response also carries the fully
+	 * rendered result-step HTML so the JS can swap it in directly — the
+	 * same no-refresh pattern the rest of the wizard already uses.
+	 */
+	public function ajax_process_import_batch(): void {
+		if ( ! check_ajax_referer( 'kd_process_import_batch', 'nonce', false ) ) {
+			wp_send_json_error( 'Invalid nonce.' );
+		}
+		if ( ! is_user_logged_in() ) {
+			wp_send_json_error( 'Not logged in.' );
+		}
+
+		$batch_id = sanitize_key( $_POST['batch_id'] ?? '' );
+		if ( ! $batch_id ) {
+			wp_send_json_error( 'Missing batch ID.' );
+		}
+
+		$state = get_transient( $batch_id );
+		if ( ! $state ) {
+			wp_send_json_error( 'Import session expired. Please start the import again.' );
+		}
+
+		$chunks = $state['chunks'];
+		$idx    = (int) $state['chunk_index'];
+		$total_chunks = count( $chunks );
+
+		if ( $idx >= $total_chunks ) {
+			// Already finished in a previous request (e.g. a duplicate
+			// call) — nothing left to process.
+			wp_send_json_success( [ 'done' => true, 'processed' => $total_chunks, 'total' => $total_chunks ] );
+		}
+
+		$chunk_plan = $chunks[ $idx ];
+
+		if ( $state['import_type'] === 'staff' ) {
+			$chunk_result = $this->staff_importer->run_import( $chunk_plan, $state['mapping'], $state['role_resolutions'] );
+		} else {
+			$chunk_result = $this->importer->run_import(
+				$chunk_plan,
+				$state['mapping'],
+				$state['total_resolution'],
+				$state['zero_score_overrides']
+			);
+		}
+
+		$state['aggregated_result'] = $this->merge_import_results( $state['aggregated_result'], $chunk_result );
+		$state['chunk_index']       = $idx + 1;
+
+		$done = $state['chunk_index'] >= $total_chunks;
+
+		if ( $done ) {
+			$result      = $state['aggregated_result'];
+			$import_type = $state['import_type'];
+			// This runs in a fresh request (separate from the one that
+			// rendered the progress modal), so rendered_import_type needs
+			// to be set explicitly here for the step indicator's staff-vs-
+			// students wording to be correct on the final result screen.
+			$this->rendered_import_type = $import_type;
+
+			$this->profile_manager->touch( $state['profile_id'] );
+
+			$log_key = $this->store_import_log( $result, $import_type, $state['profile_id'], $state['mapping'] );
+			$result['import_log_key'] = $log_key;
+
+			if ( ! empty( $state['decisions_token'] ) ) delete_transient( $state['decisions_token'] );
+			$this->cleanup_parsed_file( $state['token'] );
+			delete_transient( $batch_id );
+
+			$start_over_url = $this->get_start_over_url();
+			$history_url    = $this->find_history_page_url();
+
+			ob_start();
+			include KOODESK_IMPORTER_VIEWS . 'step-result.php';
+			$result_html = ob_get_clean();
+
+			ob_start();
+			$this->render_step_indicator( 'run_import' );
+			$indicator = ob_get_clean();
+
+			wp_send_json_success( [
+				'done'      => true,
+				'processed' => $total_chunks,
+				'total'     => $total_chunks,
+				'html'      => $indicator . $result_html,
+			] );
+		}
+
+		set_transient( $batch_id, $state, self::TRANSIENT_TTL );
+
+		wp_send_json_success( [
+			'done'      => false,
+			'processed' => $state['chunk_index'],
+			'total'     => $total_chunks,
+		] );
+	}
+
+	/**
+	 * Merge one chunk's result array into the running aggregate. Generic
+	 * over both Koodesk_Importer's and Koodesk_Staff_Importer's differently
+	 * shaped result arrays: int counters are summed, arrays are
+	 * concatenated, 'context_*' string fields keep whichever chunk set them
+	 * first (they describe the overall import, not a per-chunk value), and
+	 * any other scalar is simply overwritten (last chunk wins).
+	 */
+	private function merge_import_results( array $agg, array $chunk_result ): array {
+		foreach ( $chunk_result as $key => $value ) {
+			if ( is_int( $value ) ) {
+				$agg[ $key ] = ( $agg[ $key ] ?? 0 ) + $value;
+			} elseif ( is_array( $value ) ) {
+				$agg[ $key ] = array_merge( $agg[ $key ] ?? [], $value );
+			} elseif ( is_string( $key ) && str_starts_with( $key, 'context_' ) ) {
+				if ( empty( $agg[ $key ] ) && $value !== '' ) $agg[ $key ] = $value;
+			} else {
+				$agg[ $key ] = $value;
+			}
+		}
+		return $agg;
 	}
 
 	// -------------------------------------------------------------------------
@@ -751,6 +1092,7 @@ class Koodesk_Admin_UI {
 		// The file upload step cannot be AJAX (file upload needs multipart form)
 		// so upload always does a real POST; all other steps use AJAX.
 		$step = sanitize_key( $_POST['kd_step'] ?? 'upload' );
+		$this->rendered_step = $step;
 
 		// Set context URL from referer for start-over links
 		$referer = wp_get_referer();
@@ -759,17 +1101,17 @@ class Koodesk_Admin_UI {
 			$this->current_page_url = $uri ?: '';
 		}
 
-		ob_start();
-		$this->render_step_indicator( $step );
-
 		// 'upload' step cannot run via AJAX (needs a real page with file input).
 		// Tell the JS to navigate to the page URL instead of swapping content.
 		if ( $step === 'upload' ) {
-			ob_end_clean();
 			wp_send_json_success( [ 'redirect' => $this->get_start_over_url(), 'step' => 'upload' ] );
 			return;
 		}
 
+		// Render the step body first so we know which step actually ended up
+		// rendering (a step method may fall back to an earlier step), then
+		// render the indicator to match that, and prepend it to the body.
+		ob_start();
 		switch ( $step ) {
 			case 'classify':        $this->step_classify();        break;
 			case 'context_confirm': $this->step_context_confirm(); break;
@@ -786,9 +1128,15 @@ class Koodesk_Admin_UI {
 				// Unknown step — return the upload form so user can restart cleanly
 				$this->step_upload();
 		}
+		$body = ob_get_clean();
 
-		$html = ob_get_clean();
-		wp_send_json_success( [ 'html' => $html, 'step' => $step ] );
+		ob_start();
+		$this->render_step_indicator( $this->rendered_step );
+		$indicator = ob_get_clean();
+
+		$html = $indicator . $body;
+
+		wp_send_json_success( [ 'html' => $html, 'step' => $this->rendered_step ] );
 	}
 
 	// -------------------------------------------------------------------------
@@ -838,7 +1186,9 @@ class Koodesk_Admin_UI {
 		$profile_name = $this->unique_profile_name( $profile_name, $existing_names );
 
 		$template_id = intval( $_POST['assessment_template_id'] ?? 0 );
-		$mapping = $this->build_mapping_from_post();
+		$mapping = $import_type === 'staff'
+			? $this->build_staff_mapping_from_post()
+			: $this->build_mapping_from_post();
 
 		$errors = $this->profile_manager->validate_mapping( $mapping, $import_type );
 		if ( ! empty( $errors ) ) {
@@ -866,14 +1216,15 @@ class Koodesk_Admin_UI {
 	 */
 	private function build_mapping_from_post(): array {
 		$mapping = [
-			'student_fields'  => [],
-			'guardian_fields' => [],
-			'subjects'        => [],
-			'summary_fields'  => [],
-			'skip_cols'       => [],
-			'term_col'        => '',
-			'session_col'     => '',
-			'term_value_map'  => [ 'First' => 1, 'Second' => 2, 'Third' => 3 ],
+			'student_fields'         => [],
+			'guardian_fields'        => [],
+			'subjects'               => [],
+			'summary_fields'         => [],
+			'skip_cols'              => [],
+			'term_col'               => '',
+			'session_col'            => '',
+			'term_value_map'         => [ 'First' => 1, 'Second' => 2, 'Third' => 3 ],
+			'assessment_max_scores'  => [],
 		];
 
 		foreach ( $_POST['student_field_map'] ?? [] as $db_field => $col ) {
@@ -883,6 +1234,20 @@ class Koodesk_Admin_UI {
 			if ( $db_field === 'term' )    { $mapping['term_col']    = $col; continue; }
 			if ( $db_field === 'session' ) { $mapping['session_col'] = $col; continue; }
 			$mapping['student_fields'][ $col ] = $db_field;
+		}
+
+		// Shared Assessment Labels table — label => max score. Applied as
+		// the default max score for every subject's assessment carrying
+		// that label, unless a subject overrides it (schools generally
+		// use the same max score per label across all subjects).
+		$shared_labels = $_POST['shared_labels']   ?? [];
+		$shared_maxes  = $_POST['shared_label_max'] ?? [];
+		foreach ( $shared_labels as $i => $label ) {
+			$label = $this->sanitize_col( $label );
+			if ( $label === '' ) continue;
+			$max_raw = $shared_maxes[ $i ] ?? '';
+			if ( $max_raw === '' || ! is_numeric( $max_raw ) ) continue;
+			$mapping['assessment_max_scores'][ $label ] = (float) $max_raw;
 		}
 
 		foreach ( $_POST['subject_map'] ?? [] as $subj_data ) {
@@ -937,6 +1302,43 @@ class Koodesk_Admin_UI {
 				$mapping['student_fields'][ $col ] = $db_field;
 			}
 		}
+
+		return $mapping;
+	}
+
+	/**
+	 * Build a "staff" import mapping from POST data. Shape:
+	 * [
+	 *   'staff_fields'       => [ csv_col => db_field ],  // gender, date_of_birth,
+	 *                            phone_number, address, monthly_salary, date_hired,
+	 *                            staff_email, account_number, bank_name, employment_type,
+	 *                            first_name, last_name
+	 *   'role_col'           => 'CSV Column',   // free text, resolved to staff_role on Match Roles
+	 *   'qualification_col'  => 'CSV Column',   // pipe-delimited, e.g. "Phd Physics|BSc Chemistry"
+	 *   'section_col'        => 'CSV Column',   // pipe-delimited school_section titles
+	 *   'subject_col'        => 'CSV Column',   // pipe-delimited subject_name values
+	 * ]
+	 */
+	private function build_staff_mapping_from_post(): array {
+		$mapping = [
+			'staff_fields'      => [],
+			'role_col'          => '',
+			'qualification_col' => '',
+			'section_col'       => '',
+			'subject_col'       => '',
+		];
+
+		foreach ( $_POST['staff_field_map'] ?? [] as $db_field => $col ) {
+			$db_field = sanitize_key( $db_field );
+			$col      = $this->sanitize_col( $col );
+			if ( $col === '' || $db_field === '' ) continue;
+			$mapping['staff_fields'][ $col ] = $db_field;
+		}
+
+		$mapping['role_col']          = $this->sanitize_col( $_POST['role_col']          ?? '' );
+		$mapping['qualification_col'] = $this->sanitize_col( $_POST['qualification_col'] ?? '' );
+		$mapping['section_col']       = $this->sanitize_col( $_POST['section_col']       ?? '' );
+		$mapping['subject_col']       = $this->sanitize_col( $_POST['subject_col']       ?? '' );
 
 		return $mapping;
 	}
@@ -1139,6 +1541,70 @@ class Koodesk_Admin_UI {
 		return $decisions;
 	}
 
+	/**
+	 * Decode the posted zero_include[] checkboxes into the shape expected by
+	 * Koodesk_Importer::run_import()'s $zero_score_overrides argument:
+	 *   [ 'rows' => [row_num=>true], 'subjects' => [row_num => [subject_name=>true]] ]
+	 */
+	private function decode_zero_score_overrides( array $raw ): array {
+		$overrides = [ 'rows' => [], 'subjects' => [] ];
+
+		foreach ( $raw['rows'] ?? [] as $row_num => $val ) {
+			if ( $val ) $overrides['rows'][ (int) $row_num ] = true;
+		}
+
+		foreach ( $raw['subjects'] ?? [] as $row_num => $subjects ) {
+			if ( ! is_array( $subjects ) ) continue;
+			foreach ( $subjects as $subject_name => $val ) {
+				if ( ! $val ) continue;
+				$overrides['subjects'][ (int) $row_num ][ sanitize_text_field( wp_unslash( $subject_name ) ) ] = true;
+			}
+		}
+
+		return $overrides;
+	}
+
+	/**
+	 * Decode the staff Match step's $_POST['match'] into the shape
+	 * Koodesk_Staff_Importer::prepare_import_plan() expects — same idea as
+	 * decode_match_decisions() but keyed on 'staff_id' instead of
+	 * 'student_id' to keep the two flows unambiguous in code.
+	 */
+	private function decode_staff_match_decisions( array $raw ): array {
+		$decisions = [];
+		foreach ( $raw as $lookup_key => $data ) {
+			$action   = sanitize_key( $data['action'] ?? 'skip' );
+			$staff_id = intval( $data['staff_id'] ?? 0 );
+			$decisions[ $lookup_key ] = [ 'action' => $action, 'staff_id' => $staff_id ];
+		}
+		return $decisions;
+	}
+
+	/**
+	 * Decode the Match Roles step's $_POST['role_match'] (raw role text =>
+	 * chosen role_id) into the shape Koodesk_Staff_Importer::run_import()
+	 * expects for $role_resolutions: raw role text => ['role_id'=>.., 'role_name'=>..].
+	 * Falls back to the matcher's own auto-match for any role text the admin
+	 * didn't touch (e.g. AJAX re-render edge cases), so a role that was
+	 * already auto-matched isn't silently dropped if it's missing from POST.
+	 */
+	private function decode_role_resolutions( array $raw, Koodesk_Staff_Matcher $staff_matcher ): array {
+		$all_roles = $staff_matcher->get_all_roles();
+		$name_by_id = [];
+		foreach ( $all_roles as $r ) $name_by_id[ (int) $r['_ID'] ] = (string) $r['role_name'];
+
+		$resolutions = [];
+		foreach ( $raw as $raw_role => $role_id ) {
+			$raw_role = sanitize_text_field( wp_unslash( $raw_role ) );
+			$role_id  = intval( $role_id );
+			$resolutions[ $raw_role ] = [
+				'role_id'   => $role_id,
+				'role_name' => $role_id ? ( $name_by_id[ $role_id ] ?? '' ) : '',
+			];
+		}
+		return $resolutions;
+	}
+
 	private function count_plan( array $plan ): array {
 		$counts = [ 'existing' => 0, 'new' => 0, 'skip' => 0 ];
 		foreach ( $plan as $item ) {
@@ -1205,11 +1671,13 @@ class Koodesk_Admin_UI {
 	// -------------------------------------------------------------------------
 
 	private function render_step_indicator( string $current_step ): void {
+		$is_staff = ( $this->rendered_import_type === 'staff' );
+
 		$steps = [
 			'upload'          => '1. Upload',
 			'classify'        => '2. Map Columns',
-			'context_confirm' => '3. Confirm Context',
-			'match'           => '4. Match Students',
+			'context_confirm' => $is_staff ? '3. Confirm Mapping' : '3. Confirm Context',
+			'match'           => $is_staff ? '4. Match Staff'     : '4. Match Students',
 			'preview'         => '5. Preview',
 			'run_import'      => '6. Done',
 		];
@@ -1444,20 +1912,6 @@ class Koodesk_Admin_UI {
 		}
 		.kd-importer select option,
 		.kd-importer--frontend select option { background: var(--white-brown); color: var(--text-body); }
-
-		/* ── Mapped-column legend ── */
-		.kd-mapped-legend {
-			font-size: 11px;
-			color: #888;
-			margin-top: .3rem;
-			display: block;
-		}
-
-		/* Already-mapped options get a light grey background — no Unicode needed */
-		option.kd-opt-mapped {
-			background-color: #f0f0f1;
-			color: #999;
-		}
 
 		/* ── Back button ── */
 		.kd-back-btn {

@@ -35,6 +35,32 @@ class Koodesk_Transformer {
 	}
 
 	/**
+	 * Fill in a `max_score` on each assessment definition from the shared
+	 * `assessment_max_scores` label lookup (built from the Assessment
+	 * Labels table / assessment template on the mapping step), unless the
+	 * assessment definition already carries its own max_score.
+	 *
+	 * @param array $assessments  [ ['label'=>.., 'col'=>.., 'max_score'=>optional], ... ]
+	 * @param array $mapping      Full column mapping, may contain 'assessment_max_scores'.
+	 * @return array  Same shape, with max_score filled in where available.
+	 */
+	private function apply_assessment_max_scores( array $assessments, array $mapping ): array {
+		$lookup = $mapping['assessment_max_scores'] ?? [];
+		if ( empty( $lookup ) ) return $assessments;
+
+		foreach ( $assessments as &$a ) {
+			if ( isset( $a['max_score'] ) && $a['max_score'] !== null && $a['max_score'] !== '' ) continue;
+			$label = $a['label'] ?? '';
+			if ( $label !== '' && isset( $lookup[ $label ] ) ) {
+				$a['max_score'] = (float) $lookup[ $label ];
+			}
+		}
+		unset( $a );
+
+		return $assessments;
+	}
+
+	/**
 	 * Transform one wide CSV row into normalized payloads.
 	 *
 	 * @param string $total_resolution  'csv' | 'calculated' — FIX #3
@@ -72,7 +98,7 @@ class Koodesk_Transformer {
 			}
 
 			$assessment_items = $this->serializer->build_assessment_items(
-				$subj_map['assessments'] ?? [],
+				$this->apply_assessment_max_scores( $subj_map['assessments'] ?? [], $mapping ),
 				$csv_row,
 				$import_ts
 			);
@@ -245,6 +271,13 @@ class Koodesk_Transformer {
 		$teacher_remark   = $get_summary( 'teacher_remark' );
 		$principal_remark = $get_summary( 'principal_remark' );
 
+		// class_teacher — historical snapshot of who was in charge of this
+		// class for this term/session, distinct from teacher_remark (their
+		// written comment). Stored as free text since the person may not
+		// still hold that role, or even still be on staff, by the time the
+		// record is viewed later.
+		$class_teacher = $get_summary( 'class_teacher' );
+
 		$attendance_csv = $get_summary( 'attendance_present' );
 		if ( $attendance_csv === '' ) {
 			$attendance_csv = $get_summary( 'attendance_total_present' );
@@ -291,6 +324,7 @@ class Koodesk_Transformer {
 			'position_in_class'       => $position_in_class,
 			'teacher_remark'          => $teacher_remark,
 			'principal_remark'        => $principal_remark,
+			'class_teacher'           => $class_teacher,
 			'total_marks'             => $total_marks,
 			'attendance_total_present'=> $attendance_count,
 			'pass_status'             => '',

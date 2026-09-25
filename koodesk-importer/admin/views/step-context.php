@@ -6,28 +6,26 @@
  *            $profile_mapping, $start_over_url
  */
 
-// Example row — first student row, used to show what will actually be imported
-$example_row = $parsed['rows'][0] ?? [];
+// Cap how many rows we build a client-side preview payload for — keeps the
+// page light on very large files. Above this, the picker is hidden and the
+// review just falls back to the first row like before.
+$kd_context_preview_row_cap = 500;
 
 /**
- * Look up a value from the example row by column name.
- * Falls back to case-insensitive and trimmed comparison because the mapping
- * may have been stored with slightly different whitespace than the CSV header.
+ * Look up a value from a given row by column name. Falls back to
+ * case-insensitive/whitespace-normalised comparison because the stored
+ * mapping may differ slightly from the CSV header (e.g. double spaces,
+ * stripped apostrophes).
  */
-$get_example = function( string $col ) use ( $example_row ): string {
+$get_example_from = function( string $col, array $row ): string {
     if ( $col === '' ) return '';
-    // 1. Exact match
-    if ( array_key_exists( $col, $example_row ) ) {
-        return trim( (string) $example_row[ $col ] );
+    if ( array_key_exists( $col, $row ) ) {
+        return trim( (string) $row[ $col ] );
     }
-    // 2. Normalised fallback: collapse multiple spaces, lowercase, strip punctuation.
-    //    Handles both:
-    //    - Stored col has single space, CSV header has double space (e.g. "CCA  1st CA")
-    //    - Stored col has apostrophe stripped (e.g. "PRINCIPAL'S COMMENT")
     $norm = strtolower( trim( preg_replace( '/\s+/', ' ', $col ) ) );
     $norm = preg_replace( '/[^a-z0-9\s]/', ' ', $norm );
     $norm = trim( preg_replace( '/\s+/', ' ', $norm ) );
-    foreach ( $example_row as $k => $v ) {
+    foreach ( $row as $k => $v ) {
         $k_norm = strtolower( trim( preg_replace( '/\s+/', ' ', (string) $k ) ) );
         $k_norm = preg_replace( '/[^a-z0-9\s]/', ' ', $k_norm );
         $k_norm = trim( preg_replace( '/\s+/', ' ', $k_norm ) );
@@ -37,6 +35,71 @@ $get_example = function( string $col ) use ( $example_row ): string {
     }
     return '';
 };
+
+// Example row — defaults to the first student row; the dropdown below (JS)
+// swaps the displayed values without a page reload once rendered.
+$example_row = $parsed['rows'][0] ?? [];
+$get_example = function( string $col ) use ( $get_example_from, $example_row ): string {
+    return $get_example_from( $col, $example_row );
+};
+
+/**
+ * Render an example-value cell with a data attribute so the row-picker JS
+ * can find and update it later. Always a single <span> (rather than
+ * separate <span>/<em> tags) so swapping rows only ever needs to toggle a
+ * class + text content, never the tag itself.
+ */
+function kd_render_example_cell( string $col, string $example ): void {
+    $is_empty = ( $example === '' );
+    $cls = 'kd-example-value' . ( $is_empty ? ' is-empty' : '' );
+    $text = $is_empty ? 'empty' : $example;
+    echo '<span class="' . esc_attr( $cls ) . '" data-kd-col="' . esc_attr( $col ) . '">' . esc_html( $text ) . '</span>';
+}
+
+// ── Collect every CSV column actually referenced in the mapping review,
+//    so the client-side preview payload only carries what's needed. ──────
+$referenced_cols = [];
+foreach ( $profile_mapping['student_fields'] ?? [] as $csv_col => $db_field ) $referenced_cols[] = $csv_col;
+if ( ! empty( $profile_mapping['term_col'] ) )    $referenced_cols[] = $profile_mapping['term_col'];
+if ( ! empty( $profile_mapping['session_col'] ) ) $referenced_cols[] = $profile_mapping['session_col'];
+foreach ( $profile_mapping['subjects'] ?? [] as $subj ) {
+    foreach ( $subj['assessments'] ?? [] as $a ) {
+        if ( ! empty( $a['col'] ) ) $referenced_cols[] = $a['col'];
+    }
+    foreach ( [ 'total_col', 'grade_col', 'remark_col', 'position_col' ] as $k ) {
+        if ( ! empty( $subj[ $k ] ) ) $referenced_cols[] = $subj[ $k ];
+    }
+}
+foreach ( $profile_mapping['summary_fields'] ?? [] as $csv_col => $db_field ) $referenced_cols[] = $csv_col;
+$referenced_cols = array_values( array_unique( $referenced_cols ) );
+
+// ── Build the row-picker's option list + per-row preview payload. ────────
+// Name resolution respects both modes — First/Last (either mapped) takes
+// priority since it's lossless, Full Name is the fallback.
+$name_first_col = array_search( 'first_name', $profile_mapping['student_fields'] ?? [], true ) ?: '';
+$name_last_col  = array_search( 'last_name',  $profile_mapping['student_fields'] ?? [], true ) ?: '';
+$name_full_col  = array_search( 'full_name',  $profile_mapping['student_fields'] ?? [], true ) ?: '';
+$resolve_row_label = function( array $row ) use ( $name_first_col, $name_last_col, $name_full_col ): string {
+    if ( $name_first_col || $name_last_col ) {
+        $first = $name_first_col ? trim( (string) ( $row[ $name_first_col ] ?? '' ) ) : '';
+        $last  = $name_last_col  ? trim( (string) ( $row[ $name_last_col ]  ?? '' ) ) : '';
+        return trim( $first . ' ' . $last );
+    }
+    return $name_full_col ? trim( (string) ( $row[ $name_full_col ] ?? '' ) ) : '';
+};
+$show_row_picker = count( $parsed['rows'] ) > 1 && count( $parsed['rows'] ) <= $kd_context_preview_row_cap;
+$preview_rows = [];
+if ( $show_row_picker ) {
+    foreach ( $parsed['rows'] as $i => $row ) {
+        $label = $resolve_row_label( $row );
+        if ( $label === '' ) $label = 'Row ' . ( $i + 1 );
+        $values = [];
+        foreach ( $referenced_cols as $col ) {
+            $values[ $col ] = $get_example_from( $col, $row );
+        }
+        $preview_rows[] = [ 'label' => $label, 'values' => $values ];
+    }
+}
 ?>
 
 <div class="kd-section">
@@ -78,10 +141,21 @@ $get_example = function( string $col ) use ( $example_row ): string {
     <?php if ( ! empty( $profile_mapping ) ) : ?>
     <details style="margin-top:1.5rem" open>
         <summary style="cursor:pointer;font-weight:700;font-size:14px">
-            Full Column Mapping Review — <span style="font-weight:normal;color:#666">using first student as example</span>
+            Full Column Mapping Review — <span style="font-weight:normal;color:#666">using <span id="kd-context-row-desc">first student</span> as example</span>
         </summary>
 
         <div style="margin-top:.85rem">
+
+            <?php if ( $show_row_picker ) : ?>
+            <div style="margin-bottom:1rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+                <label for="kd-context-row-select" style="font-size:12px;font-weight:600;color:var(--tertiary)">Preview a different row:</label>
+                <select id="kd-context-row-select" class="kd-select" style="max-width:280px;font-size:13px">
+                    <?php foreach ( $preview_rows as $i => $pr ) : ?>
+                        <option value="<?php echo intval( $i ); ?>"<?php selected( $i, 0 ); ?>><?php echo esc_html( $pr['label'] ); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <?php endif; ?>
 
             <!-- Student fields -->
             <h4 style="font-size:13px;margin:.5rem 0 .4rem;color:var(--text-body)">Student &amp; Context Fields</h4>
@@ -90,41 +164,29 @@ $get_example = function( string $col ) use ( $example_row ): string {
                     <tr>
                         <th style="width:170px">DB Field</th>
                         <th style="width:220px">CSV Column</th>
-                        <th>Example value (first student)</th>
+                        <th>Example value</th>
                     </tr>
                 </thead>
                 <tbody>
-                <?php foreach ( $profile_mapping['student_fields'] ?? [] as $csv_col => $db_field ) :
-                    $example = $get_example( $csv_col );
-                ?>
+                <?php foreach ( $profile_mapping['student_fields'] ?? [] as $csv_col => $db_field ) : ?>
                 <tr>
                     <td><code><?php echo esc_html($db_field); ?></code></td>
                     <td><?php echo esc_html($csv_col); ?></td>
-                    <td>
-                        <?php if ( $example !== '' ) : ?>
-                            <span style="font-size:12px"><?php echo esc_html($example); ?></span>
-                        <?php else : ?>
-                            <em style="color:#999;font-size:12px">empty</em>
-                        <?php endif; ?>
-                    </td>
+                    <td><?php kd_render_example_cell( $csv_col, $get_example( $csv_col ) ); ?></td>
                 </tr>
                 <?php endforeach; ?>
-                <?php if ( ! empty( $profile_mapping['term_col'] ) ) :
-                    $example = $get_example( $profile_mapping['term_col'] ) ?? '';
-                ?>
+                <?php if ( ! empty( $profile_mapping['term_col'] ) ) : ?>
                 <tr>
                     <td><code>term</code></td>
                     <td><?php echo esc_html($profile_mapping['term_col']); ?></td>
-                    <td><?php if ( $example !== '' ) echo '<span style="font-size:12px">' . esc_html($example) . '</span>'; else echo '<em style="color:#999;font-size:12px">empty</em>'; ?></td>
+                    <td><?php kd_render_example_cell( $profile_mapping['term_col'], $get_example( $profile_mapping['term_col'] ) ); ?></td>
                 </tr>
                 <?php endif; ?>
-                <?php if ( ! empty( $profile_mapping['session_col'] ) ) :
-                    $example = $get_example( $profile_mapping['session_col'] ) ?? '';
-                ?>
+                <?php if ( ! empty( $profile_mapping['session_col'] ) ) : ?>
                 <tr>
                     <td><code>session</code></td>
                     <td><?php echo esc_html($profile_mapping['session_col']); ?></td>
-                    <td><?php if ( $example !== '' ) echo '<span style="font-size:12px">' . esc_html($example) . '</span>'; else echo '<em style="color:#999;font-size:12px">empty</em>'; ?></td>
+                    <td><?php kd_render_example_cell( $profile_mapping['session_col'], $get_example( $profile_mapping['session_col'] ) ); ?></td>
                 </tr>
                 <?php endif; ?>
                 </tbody>
@@ -143,19 +205,11 @@ $get_example = function( string $col ) use ( $example_row ): string {
                         <th>Example value</th>
                     </tr></thead>
                     <tbody>
-                    <?php foreach ( $subj['assessments'] as $a ) :
-                        $example = $get_example( $a['col'] ) ?? '';
-                    ?>
+                    <?php foreach ( $subj['assessments'] as $a ) : ?>
                     <tr>
                         <td><?php echo esc_html($a['label']); ?></td>
                         <td><code><?php echo esc_html($a['col']); ?></code></td>
-                        <td>
-                            <?php if ( $example !== '' ) : ?>
-                                <span style="font-size:12px"><?php echo esc_html($example); ?></span>
-                            <?php else : ?>
-                                <em style="color:#999;font-size:12px">empty</em>
-                            <?php endif; ?>
-                        </td>
+                        <td><?php kd_render_example_cell( $a['col'], $get_example( $a['col'] ) ); ?></td>
                     </tr>
                     <?php endforeach; ?>
                     <?php
@@ -167,18 +221,11 @@ $get_example = function( string $col ) use ( $example_row ): string {
                     ];
                     foreach ( $meta_cols as $key => $label ) :
                         if ( empty( $subj[ $key ] ) ) continue;
-                        $example = $get_example( $subj[$key] ) ?? '';
                     ?>
                     <tr>
                         <td><?php echo $label; ?></td>
                         <td><code><?php echo esc_html($subj[$key]); ?></code></td>
-                        <td>
-                            <?php if ( $example !== '' ) : ?>
-                                <span style="font-size:12px"><?php echo esc_html($example); ?></span>
-                            <?php else : ?>
-                                <em style="color:#999;font-size:12px">empty</em>
-                            <?php endif; ?>
-                        </td>
+                        <td><?php kd_render_example_cell( $subj[ $key ], $get_example( $subj[ $key ] ) ); ?></td>
                     </tr>
                     <?php endforeach; ?>
                     </tbody>
@@ -197,19 +244,11 @@ $get_example = function( string $col ) use ( $example_row ): string {
                     <th>Example value</th>
                 </tr></thead>
                 <tbody>
-                <?php foreach ( $profile_mapping['summary_fields'] as $csv_col => $db_field ) :
-                    $example = $get_example( $csv_col );
-                ?>
+                <?php foreach ( $profile_mapping['summary_fields'] as $csv_col => $db_field ) : ?>
                 <tr>
                     <td><code><?php echo esc_html($db_field); ?></code></td>
                     <td><?php echo esc_html($csv_col); ?></td>
-                    <td>
-                        <?php if ( $example !== '' ) : ?>
-                            <span><?php echo esc_html($example); ?></span>
-                        <?php else : ?>
-                            <em style="color:#999;font-size:12px">empty</em>
-                        <?php endif; ?>
-                    </td>
+                    <td><?php kd_render_example_cell( $csv_col, $get_example( $csv_col ) ); ?></td>
                 </tr>
                 <?php endforeach; ?>
                 </tbody>
@@ -219,7 +258,13 @@ $get_example = function( string $col ) use ( $example_row ): string {
             <p style="margin:.6rem 0 0;font-size:13px;color:var(--text-body)">
                 <strong style=" color: var(--tertiary)">Total marks obtainable (calculated):</strong>
                 <?php echo intval( $total_marks_calculated ); ?>
-                <span style="color:#888">(<?php echo intval( $subject_count_estimated ); ?> subjects × 100 — used when no total marks column is mapped)</span>
+                <?php if ( ! empty( $total_marks_all_real_max ) ) : ?>
+                    <span style="color:#888">(from the max scores you set for each assessment label — used when no total marks column is mapped)</span>
+                <?php elseif ( ! empty( $total_marks_any_real_max ) ) : ?>
+                    <span style="color:#888">(using your mapped max scores where set; subjects without a matching label assume 100 — used when no total marks column is mapped)</span>
+                <?php else : ?>
+                    <span style="color:#888">(<?php echo intval( $subject_count_estimated ); ?> subjects × 100 — set max scores on the Map Columns step for an accurate total; used when no total marks column is mapped)</span>
+                <?php endif; ?>
             </p>
             <?php endif; ?>
             <?php endif; ?>
@@ -243,3 +288,39 @@ $get_example = function( string $col ) use ( $example_row ): string {
 
     <?php endif; ?>
 </div>
+
+<?php if ( $show_row_picker ) : ?>
+<style>
+.kd-example-value { font-size: 12px; }
+.kd-example-value.is-empty { color: #999; font-style: italic; }
+</style>
+<script>
+(function(){
+    var previewRows = <?php echo wp_json_encode( $preview_rows ); ?>;
+    var select = document.getElementById('kd-context-row-select');
+    var desc   = document.getElementById('kd-context-row-desc');
+    if (!select) return;
+
+    function applyRow(idx) {
+        var row = previewRows[idx];
+        if (!row) return;
+
+        if (desc) desc.textContent = row.label;
+
+        Object.keys(row.values).forEach(function(col) {
+            var val = row.values[col];
+            var isEmpty = (val === '');
+            document.querySelectorAll('[data-kd-col]').forEach(function(el) {
+                if (el.getAttribute('data-kd-col') !== col) return;
+                el.textContent = isEmpty ? 'empty' : val;
+                el.classList.toggle('is-empty', isEmpty);
+            });
+        });
+    }
+
+    select.addEventListener('change', function() {
+        applyRow(parseInt(this.value, 10));
+    });
+})();
+</script>
+<?php endif; ?>
