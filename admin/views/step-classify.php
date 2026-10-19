@@ -53,6 +53,7 @@ $summary_db_fields = [
 	'class_teacher'      => 'Class Teacher / Form Tutor',
 	'total_marks'        => 'Total Marks Obtainable',
 	'attendance_present' => 'Attendance (days present)',
+	'attendance_total_open' => 'No. of Days School Opened (optional, falls back to Academic Calendar)',
 ];
 
 // Guardian sub-fields — match the `guardians` repeater on the `families` CCT.

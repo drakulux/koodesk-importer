@@ -94,8 +94,15 @@ class Koodesk_Column_Classifier {
 		'form tutor'           => 'class_teacher',
 		'pass status'          => 'pass_status',
 		'attendance'           => 'attendance_present',
+		'attend' 	           => 'attendance_present',
 		'days present'         => 'attendance_present',
 		'days attended'        => 'attendance_present',
+		'no of school opening' => 'attendance_total_open',
+		'no sch open'          => 'attendance_total_open',
+		'school opening'       => 'attendance_total_open',
+		'days school open'     => 'attendance_total_open',
+		'times school opened'  => 'attendance_total_open',
+		'no of times school opened' => 'attendance_total_open',
 	];
 
 	// ── Per-subject meta keywords ─────────────────────────────────────────

@@ -33,6 +33,39 @@ class Koodesk_Transformer {
 		}
 		return '';
 	}
+	
+	/**
+	 * Parse "3", "3rd", "1st", "22nd" into an int. Anything else (e.g. "3rd of 24") returns 0.
+	 */
+	private function parse_position( string $raw ): int {
+		if ( preg_match( '/^\s*(\d+)\s*(st|nd|rd|th)?\s*$/i', $raw, $m ) ) {
+			return (int) $m[1];
+		}
+		return 0;
+	}
+	
+	// -------------------------------------------------------------------------
+	// Calendar Lookup Helper
+	// -------------------------------------------------------------------------
+	
+	private array $calendar_cache = [];
+
+	private function lookup_calendar_open_days( string $session, int $term ): int {
+		if ( $session === '' || ! $term ) return 0;
+		$key = $session . '|' . $term;
+		if ( isset( $this->calendar_cache[ $key ] ) ) return $this->calendar_cache[ $key ];
+
+		global $wpdb;
+		$table = $wpdb->prefix . 'jet_cct_academic_calendar';
+		$val = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT open_days FROM {$table}
+			 WHERE session = %s AND term = %d AND cct_status = 'publish'
+			 ORDER BY _ID DESC LIMIT 1",
+			$session, $term
+		) );
+		return $this->calendar_cache[ $key ] = $val;
+	}
+
 
 	/**
 	 * Fill in a `max_score` on each assessment definition from the shared
@@ -174,10 +207,7 @@ class Koodesk_Transformer {
 
 			$subject_position = 0;
 			if ( ! empty( $subj_map['position_col'] ) ) {
-				$csv_pos = $this->row_get( $csv_row, $subj_map['position_col'] );
-				if ( $csv_pos !== '' && is_numeric( $csv_pos ) ) {
-					$subject_position = (int) $csv_pos;
-				}
+				$subject_position = $this->parse_position( $this->row_get( $csv_row, $subj_map['position_col'] ) );
 			}
 
 			$academic_records[] = [
@@ -264,8 +294,7 @@ class Koodesk_Transformer {
 			? (float) $term_avg_csv
 			: ( $subject_count > 0 ? round( $subject_totals / $subject_count, 2 ) : 0.0 );
 
-		$pos_csv = $get_summary( 'position_in_class' );
-		$position_in_class = ( $pos_csv !== '' && is_numeric( $pos_csv ) ) ? (int) $pos_csv : 0;
+		$position_in_class = $this->parse_position( $get_summary( 'position_in_class' ) );
 
 		// FIX #15: teacher_remark and principal_remark are separate fields
 		$teacher_remark   = $get_summary( 'teacher_remark' );
@@ -308,6 +337,17 @@ class Koodesk_Transformer {
 				}
 			}
 		}
+		$open_csv = $get_summary( 'attendance_total_open' );
+		$days_open = ( $open_csv !== '' && is_numeric( $open_csv ) ) ? (int) $open_csv : 0;
+
+		if ( $days_open === 0 ) {
+			$days_open = $this->lookup_calendar_open_days( $session, $term_int );
+		}
+
+		// sanity: present can't exceed open
+		if ( $days_open > 0 && $attendance_count > $days_open ) {
+			// add a warning via $warnings (pass it into build_term_summary by reference)
+		}
 
 		return [
 			'student_id'              => $student_id,
@@ -327,6 +367,7 @@ class Koodesk_Transformer {
 			'class_teacher'           => $class_teacher,
 			'total_marks'             => $total_marks,
 			'attendance_total_present'=> $attendance_count,
+			'attendance_total_open'   => $days_open,
 			'pass_status'             => '',
 			'cct_status'              => 'publish',
 		];
